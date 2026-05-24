@@ -1,4 +1,4 @@
-const CACHE = 'mk-crm-v44';
+const CACHE = 'mk-crm-v45';
 const ASSETS = ['./', './index.html', './config.js', './airtable.js', './finance.js', './leads.js', './analytics.js', './settings.js', './app.js', './style.css', './sw.js'];
 
 self.addEventListener('install', e => {
