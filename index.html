@@ -18,6 +18,13 @@
 </head>
 <body>
 
+<!-- ── Mobile top bar (only on phones) ── -->
+<div id="mobile-topbar" class="mobile-topbar">
+  <button class="mobile-back-btn" id="mobile-back-btn" onclick="mobileGoBack()">‹ Назад</button>
+  <div class="mobile-topbar-title" id="mobile-topbar-title">🎯 Лиды</div>
+  <button class="mobile-topbar-action" onclick="openPipelineSettings()" title="Настройка">⚙️</button>
+</div>
+
 <div class="header" style="justify-content:space-between; width:100%; box-sizing:border-box;">
   <div style="display:flex; align-items:center; gap:14px;">
     <div class="header-logo">👑</div>

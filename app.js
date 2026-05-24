@@ -151,6 +151,11 @@ function navigate(page) {
   document.getElementById('page-' + page).classList.add('active');
   document.querySelector(`[data-page="${page}"]`).classList.add('active');
   State.currentPage = page;
+  // Обновляем заголовок мобильной шапки
+  const titleEl = document.getElementById('mobile-topbar-title');
+  if (titleEl) titleEl.textContent = _MOBILE_PAGE_TITLES[page] || page;
+  // Скрываем кнопку "Назад" при переходе между страницами
+  updateMobileBar();
   // Автообновление только на странице лидов
   if (page === 'leads') startAutoRefresh();
   else stopAutoRefresh();
@@ -181,13 +186,39 @@ function spinner(id) {
 // ЛИДЫ
 // ════════════════════════════
 
+// ─── Mobile top bar helpers
+const _MOBILE_PAGE_TITLES = {
+  leads: '🎯 Лиды', clients: '👥 Клиенты', deals: '📁 Проекты',
+  operations: '📋 Операции', finance: '💰 Финансы', analytics: '📊 Отчёты'
+};
+
+function updateMobileBar() {
+  const backBtn = document.getElementById('mobile-back-btn');
+  if (!backBtn) return;
+  const anyOpen = document.querySelectorAll('.overlay.open').length > 0;
+  if (anyOpen) backBtn.classList.add('visible');
+  else backBtn.classList.remove('visible');
+}
+
+function mobileGoBack() {
+  const openOverlays = document.querySelectorAll('.overlay.open');
+  if (openOverlays.length > 0) {
+    openOverlays[openOverlays.length - 1].classList.remove('open');
+    updateMobileBar();
+  }
+}
+
 function openDrawer(id) {
   document.getElementById(id).classList.add('open');
   if(id==='drawer-lead') { populateLeadStageSelect(); populateEmployeeSelect('l-manager'); }
   if(id==='drawer-deal') { populateClientSelect(); populateTariffSelect('d-tariff'); populateEmployeeSelect('d-employee'); }
   if(id==='drawer-operation'){populateDealSelect('op-deal');populateEmployeeSelect('op-employee');}
+  updateMobileBar();
 }
-function closeDrawer(id){document.getElementById(id).classList.remove('open');}
+function closeDrawer(id) {
+  document.getElementById(id).classList.remove('open');
+  updateMobileBar();
+}
 document.querySelectorAll('.overlay').forEach(o=>o.addEventListener('click',e=>{if(e.target===o)o.classList.remove('open');}));
 
 function fabAction(){

@@ -1912,6 +1912,13 @@ textarea.compact-input {
 
 
 /* ════════════════════════════════════════════════════════
+   MOBILE TOP BAR
+   ════════════════════════════════════════════════════════ */
+.mobile-topbar {
+  display: none; /* скрыт на десктопе */
+}
+
+/* ════════════════════════════════════════════════════════
    MOBILE OPTIMIZATIONS  ≤ 767px
    Цель: стата = тонкая горизонтальная полоска (~55px),
          фильтр = компактная прокручиваемая строка,
@@ -1919,25 +1926,84 @@ textarea.compact-input {
    ════════════════════════════════════════════════════════ */
 @media (max-width: 767px) {
 
+  /* ── Скрываем десктопный хедер ──────────────── */
+  .header { display: none !important; }
+
+  /* ── Мобильная шапка с safe-area ────────────── */
+  .mobile-topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    /* Отступ сверху = высота статус-бара / камеры */
+    padding-top: env(safe-area-inset-top);
+    padding-left: 16px;
+    padding-right: 16px;
+    padding-bottom: 0;
+    height: calc(44px + env(safe-area-inset-top));
+    background: rgba(15, 23, 42, 0.95);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    position: sticky;
+    top: 0;
+    z-index: 300;
+    flex-shrink: 0;
+  }
+
+  /* Кнопка "‹ Назад" */
+  .mobile-back-btn {
+    background: none;
+    border: none;
+    color: #818cf8;
+    font-size: 16px;
+    font-weight: 600;
+    font-family: inherit;
+    padding: 8px 4px;
+    margin-left: -4px;
+    cursor: pointer;
+    min-width: 72px;
+    text-align: left;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+    white-space: nowrap;
+  }
+  .mobile-back-btn.visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* Заголовок текущей страницы */
+  .mobile-topbar-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: #fff;
+    text-align: center;
+    flex: 1;
+    letter-spacing: -0.01em;
+  }
+
+  /* Кнопка действия (⚙️) */
+  .mobile-topbar-action {
+    background: none;
+    border: none;
+    font-size: 18px;
+    padding: 8px 4px;
+    margin-right: -4px;
+    cursor: pointer;
+    min-width: 44px;
+    text-align: right;
+    opacity: 0.7;
+  }
+  .mobile-topbar-action:active { opacity: 1; }
+
   /* ── Page padding ───────────────────────────── */
   .page {
     padding: 8px 10px;
     padding-bottom: 80px;
   }
 
-  /* ── Header ─────────────────────────────────── */
-  .header {
-    padding: 6px 12px;
-    min-height: 44px;
-  }
-  .header h1 { font-size: 15px; }
-  .header-sub { font-size: 9px; }
-  .header-logo { font-size: 18px; }
-  .header-btn {
-    font-size: 10px;
-    padding: 4px 8px;
-    gap: 3px;
-  }
+  /* ── Header (desktop) уже скрыт выше ───────── */
 
   /* ── Stats: горизонтальный скролл чипов ─────── */
   .stats-grid {
