@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+  <meta name="theme-color" content="#0f172a"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="apple-mobile-web-app-title" content="MK CRM"/>
+  <title>MediaKings CRM</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <link rel="manifest" href="manifest.json"/>
+  <link rel="apple-touch-icon" href="icon-192.png"/>
+  <link rel="stylesheet" href="style.css"/>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<div class="header" style="justify-content:space-between; width:100%; box-sizing:border-box;">
+  <div style="display:flex; align-items:center; gap:14px;">
+    <div class="header-logo">👑</div>
+    <div><h1>MediaKings</h1><div class="header-sub">CRM система</div></div>
+    <button class="header-btn" onclick="openPipelineSettings()" title="Настройка воронок" style="margin-left:8px; gap:4px; font-size:12px; padding:6px 12px;">
+      ⚙️ Настройка
+    </button>
+  </div>
+  <button class="header-btn" id="btn-refresh-data" onclick="refreshCRMData()" title="Обновить данные" style="gap:6px; font-size:12px; padding:6px 12px;">
+    <span class="refresh-icon" style="display:inline-block;">🔄</span> Обновить
+  </button>
+</div>
+<div id="toast" class="toast"></div>
+
+<!-- PAGES -->
+<div id="page-leads" class="page active">
+  <div id="leads-stats"></div>
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px; margin-bottom:12px; flex-wrap:wrap; gap:10px;">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <select id="pipeline-select" class="form-select" onchange="switchPipeline(this.value)" style="margin:0; font-size:16px; font-weight:700; border:none; padding:0 32px 0 0; background-position:right center; width:auto; cursor:pointer; background-color:transparent; color:var(--text1)">
+        <!-- Dynamic pipelines list -->
+      </select>
+    </div>
+    <label class="archive-toggle-label" style="display:flex; align-items:center; gap:8px; font-size:13px; font-weight:600; color:var(--text2); cursor:pointer; user-select:none;">
+      <input type="checkbox" id="chk-show-archived" onchange="toggleShowArchived(this.checked)" style="width:16px; height:16px; accent-color:var(--accent); cursor:pointer;"/>
+      📁 Показать архив
+    </label>
+  </div>
+
+  <!-- Leads Filters Bar -->
+  <div class="leads-filter-bar">
+    <!-- 🔍 Поиск по ключевым словам -->
+    <div class="filter-group filter-group-search">
+      <span class="filter-label">🔍 Поиск:</span>
+      <input type="text" id="flt-search" oninput="onLeadsFilterChange()" class="filter-input" placeholder="Имя, телефон, ниша..."/>
+    </div>
+
+    <div class="filter-group">
+      <span class="filter-label">👤 Менеджер:</span>
+      <select id="flt-manager" onchange="onLeadsFilterChange()" class="filter-select" style="width: 150px;">
+        <option value="">Все менеджеры</option>
+      </select>
+    </div>
+    
+    <div class="filter-group">
+      <span class="filter-label">📅 Фильтр дат:</span>
+      <select id="flt-date-type" onchange="onLeadsFilterChange()" class="filter-select" style="width: 170px;">
+        <option value="">Без фильтра дат</option>
+        <option value="assign">Дата назначения конс.</option>
+        <option value="consult">Дата проведения конс.</option>
+      </select>
+    </div>
+
+    <div class="filter-group filter-group-date">
+      <input type="date" id="flt-date" onchange="onLeadsFilterChange()" class="filter-input" style="display:none; width: 135px;" onclick="try{this.showPicker()}catch(e){}"/>
+    </div>
+
+    <!-- Clear Filters Button -->
+    <button id="flt-clear-btn" onclick="clearLeadsFilters()" class="btn btn-secondary btn-compact" style="height:36px; padding:0 12px !important; font-size:12px; display:none; align-items:center; gap:4px; margin:0; background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.3); color:#fca5a5; border-radius:10px;">❌ Сбросить</button>
+  </div>
+  <div id="leads-kanban" class="kanban-wrap"><div class="loading-state"><div class="spinner"></div></div></div>
+</div>
+<div id="page-clients" class="page">
+  <div class="search-bar"><span class="icon">🔍</span><input type="text" placeholder="Поиск клиента..." oninput="renderClients(this.value)"/></div>
+  <div id="clients-list"><div class="loading-state"><div class="spinner"></div></div></div>
+</div>
+<div id="page-deals" class="page">
+  <div class="search-bar"><span class="icon">🔍</span><input type="text" placeholder="Поиск проекта..." oninput="renderDeals(this.value)"/></div>
+  <div id="deals-list"><div class="loading-state"><div class="spinner"></div></div></div>
+</div>
+<div id="page-operations" class="page">
+  <div id="operations-list"><div class="loading-state"><div class="spinner"></div></div></div>
+</div>
+
+<div id="page-finance" class="page">
+  <div class="finance-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+    <div style="font-size:18px; font-weight:800;">💰 Финансы</div>
+    <div style="display:flex; gap:8px;">
+      <button class="btn btn-primary btn-compact" onclick="openDrawer('drawer-income'); prepareIncomeDrawer();" style="margin:0; background:linear-gradient(135deg,#10b981,#059669); height:36px; display:inline-flex; align-items:center; gap:4px; font-size:13px; font-weight:700; border:none;">💰 ＋ Доход</button>
+      <button class="btn btn-danger btn-compact" onclick="openDrawer('drawer-expense'); prepareExpenseDrawer();" style="margin:0; background:linear-gradient(135deg,#ef4444,#dc2626); height:36px; display:inline-flex; align-items:center; gap:4px; font-size:13px; font-weight:700; border:none;">💸 ＋ Расход</button>
+    </div>
+  </div>
+
+  <!-- Counters / Stats -->
+  <div class="an-period-selector" style="margin-bottom:16px; display:flex; gap:8px; overflow-x:auto; padding-bottom:4px;">
+    <button class="an-period-btn active" data-fperiod="all" onclick="setFinancePeriod('all')">Все время</button>
+    <button class="an-period-btn" data-fperiod="today" onclick="setFinancePeriod('today')">Сегодня</button>
+    <button class="an-period-btn" data-fperiod="week" onclick="setFinancePeriod('week')">Неделя</button>
+    <button class="an-period-btn" data-fperiod="month" onclick="setFinancePeriod('month')">Месяц</button>
+  </div>
+
+  <div class="an-stats-grid" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:10px; margin-bottom:18px;">
+    <div class="an-stat-card" style="padding: 12px 14px;">
+      <div class="an-stat-label" style="font-size:10px;">Общий баланс</div>
+      <div id="fin-stat-balance" class="an-stat-value" style="color:#60a5fa; font-size:16px; font-weight:800;">0 ₸</div>
+    </div>
+    <div class="an-stat-card" style="padding: 12px 14px;">
+      <div class="an-stat-label" style="font-size:10px;">Выручка по цене</div>
+      <div id="fin-stat-income-expected" class="an-stat-value" style="color:#a855f7; font-size:16px; font-weight:800;">0 ₸</div>
+    </div>
+    <div class="an-stat-card" style="padding: 12px 14px;">
+      <div class="an-stat-label" style="font-size:10px;">Выручка в кассу</div>
+      <div id="fin-stat-income-actual" class="an-stat-value" style="color:#10b981; font-size:16px; font-weight:800;">0 ₸</div>
+    </div>
+    <div class="an-stat-card" style="padding: 12px 14px;">
+      <div class="an-stat-label" style="font-size:10px;">Расходы</div>
+      <div id="fin-stat-expenses" class="an-stat-value" style="color:#ef4444; font-size:16px; font-weight:800;">0 ₸</div>
+    </div>
+    <div class="an-stat-card" style="padding: 12px 14px;">
+      <div class="an-stat-label" style="font-size:10px;">Чистая прибыль</div>
+      <div id="fin-stat-profit" class="an-stat-value" style="color:#fbbf24; font-size:16px; font-weight:800;">0 ₸</div>
+    </div>
+  </div>
+
+  <!-- Accounts list -->
+  <div style="font-size:11px; font-weight:800; color:var(--text2); text-transform:uppercase; margin-bottom:8px; letter-spacing:0.05em;">Счета и кошельки</div>
+  <div id="finance-accounts-list" style="display:flex; gap:8px; overflow-x:auto; padding-bottom:8px; margin-bottom:16px;">
+    <!-- Active accounts dynamic list -->
+  </div>
+
+  <!-- Tabs segment control -->
+  <div style="display:flex; border-bottom:1px solid rgba(255,255,255,0.08); margin-bottom:16px; gap:8px;">
+    <button id="tab-btn-fin-incomes" class="btn" style="background:none; border:none; border-bottom:2px solid var(--accent); color:#fff; padding:8px 16px; font-weight:700; font-size:14px; cursor:pointer; margin:0; border-radius:0;" onclick="switchFinanceTab('incomes')">💰 Доходы</button>
+    <button id="tab-btn-fin-expenses" class="btn" style="background:none; border:none; border-bottom:2px solid transparent; color:var(--text2); padding:8px 16px; font-weight:700; font-size:14px; cursor:pointer; margin:0; border-radius:0;" onclick="switchFinanceTab('expenses')">💸 Расходы</button>
+  </div>
+
+  <!-- Search & Filter bar for transactions -->
+  <div class="search-bar" style="margin-bottom:12px;">
+    <span class="icon">🔍</span>
+    <input type="text" id="finance-search-input" placeholder="Поиск по примечанию, клиенту, партнеру..." oninput="onFinanceSearch()"/>
+  </div>
+
+  <!-- Incomes Table -->
+  <div id="finance-incomes-container" class="an-table-wrap" style="max-height: 450px; overflow-y: auto;">
+    <table class="an-table">
+      <thead>
+        <tr>
+          <th>Дата</th>
+          <th>Сумма / Договор</th>
+          <th>Счет</th>
+          <th>Категория</th>
+          <th>Клиент / Заказ</th>
+          <th>Прим. / Менеджер / Партнер</th>
+          <th style="width:40px;"></th>
+        </tr>
+      </thead>
+      <tbody id="finance-incomes-tbody"></tbody>
+    </table>
+  </div>
+
+  <!-- Expenses Table -->
+  <div id="finance-expenses-container" class="an-table-wrap" style="display:none; max-height: 450px; overflow-y: auto;">
+    <table class="an-table">
+      <thead>
+        <tr>
+          <th>Дата</th>
+          <th>Сумма</th>
+          <th>Счет</th>
+          <th>Категория</th>
+          <th>Сотрудник / Заказ</th>
+          <th>Прим. / Бюджет</th>
+          <th style="width:40px;"></th>
+        </tr>
+      </thead>
+      <tbody id="finance-expenses-tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<div id="page-analytics" class="page">
+  <div id="analytics-content"><div class="loading-state"><div class="spinner"></div></div></div>
+</div>
+
+<!-- FAB speed-dial для финансов -->
+<div id="fab-finance-menu" style="display:none;position:fixed;bottom:100px;right:20px;z-index:1001;display:none;flex-direction:column-reverse;gap:10px;align-items:flex-end;">
+  <button class="fab-mini fab-income" onclick="fabFinanceIncome()">💰 Доход</button>
+  <button class="fab-mini fab-expense" onclick="fabFinanceExpense()">💸 Расход</button>
+</div>
+<button class="fab" onclick="fabAction()">+</button>
+
+<nav class="bottom-nav">
+  <button class="nav-item active" data-page="leads" onclick="navigate('leads')"><span class="icon">🎯</span><span>Лиды</span></button>
+  <button class="nav-item" data-page="clients" onclick="navigate('clients')"><span class="icon">👥</span><span>Клиенты</span></button>
+  <button class="nav-item" data-page="deals" onclick="navigate('deals')"><span class="icon">📁</span><span>Проекты</span></button>
+  <button class="nav-item" data-page="operations" onclick="navigate('operations')"><span class="icon">📋</span><span>Операции</span></button>
+  <button class="nav-item" data-page="finance" onclick="navigate('finance')"><span class="icon">💰</span><span>Финансы</span></button>
+  <button class="nav-item" data-page="analytics" onclick="navigate('analytics')"><span class="icon">📊</span><span>Отчёты</span></button>
+</nav>
+
+<!-- DRAWERS -->
+<div id="drawer-detail" class="overlay">
+  <div class="drawer">
+    <button class="drawer-close-btn" onclick="closeDrawer('drawer-detail')">&times;</button>
+    <div id="detail-content"></div>
+  </div>
+</div>
+
+
+<!-- Add Lead -->
+<div id="drawer-lead" class="overlay">
+  <div class="drawer">
+    <button class="drawer-close-btn" onclick="closeDrawer('drawer-lead')">&times;</button>
+    <div class="drawer-handle"></div>
+    <div class="drawer-title">🎯 Новый лид</div>
+    <div class="card">
+      <div class="form-group"><label class="form-label">Имя *</label>
+        <input id="l-name" class="form-input" type="text" placeholder="Иван Иванов"/></div>
+      <div class="form-group"><label class="form-label">Телефон</label>
+        <input id="l-phone" class="form-input" type="tel" placeholder="+7 900 000 00 00"/></div>
+      <div class="form-group"><label class="form-label">Источник</label>
+        <input id="l-source" class="form-input" type="text" placeholder="Instagram, ВКонтакте, сарафан..."/></div>
+      <div class="form-group"><label class="form-label">Бюджет (₸)</label>
+        <input id="l-budget" class="form-input" type="number" placeholder="0"/></div>
+      <div class="form-group"><label class="form-label">Менеджер</label>
+        <select id="l-manager" class="form-select">
+          <option value="">— не назначен —</option>
+        </select></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="form-group" style="margin:0"><label class="form-label">📅 Дата конс.</label>
+          <input id="l-consult-date" class="form-input" type="date" onclick="try{this.showPicker()}catch(e){}"/></div>
+        <div class="form-group" style="margin:0"><label class="form-label">🕒 Время конс.</label>
+          <input id="l-consult-time" class="form-input" type="time" onclick="try{this.showPicker()}catch(e){}"/></div>
+      </div>
+      <div class="form-group"><label class="form-label">Этап</label>
+        <select id="l-stage" class="form-select"></select></div>
+      <div class="form-group"><label class="form-label">Комментарий</label>
+        <textarea id="l-comment" class="form-input form-textarea" placeholder="Заметки о лиде..."></textarea></div>
+    </div>
+    <button id="save-lead-btn" class="btn btn-primary" onclick="saveLead()">💾 Сохранить лид</button>
+    <button class="btn btn-secondary" onclick="closeDrawer('drawer-lead')">Отмена</button>
+  </div>
+</div>
+
+<!-- Add Sale / Convert Lead to Deal -->
+<div id="drawer-sale" class="overlay">
+  <div class="drawer" style="max-height: 90vh; overflow-y: auto;">
+    <button class="drawer-close-btn" onclick="closeDrawer('drawer-sale')">&times;</button>
+    <div class="drawer-handle"></div>
+    <div class="drawer-title">💰 Оформить продажу</div>
+    <input type="hidden" id="sale-lead-id"/>
+
+    <!-- ── Данные клиента ── -->
+    <div class="section-title" style="margin-top:0">👤 Данные клиента</div>
+    <div class="card" style="margin-bottom:16px; padding:14px 16px;">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+        <div class="form-group" style="margin:0;">
+          <label class="form-label">Имя *</label>
+          <input id="sale-client-name" class="form-input compact-input" type="text" placeholder="Имя клиента"/>
+        </div>
+        <div class="form-group" style="margin:0;">
+          <label class="form-label">Телефон</label>
+          <input id="sale-client-phone" class="form-input compact-input" type="tel" placeholder="+7..."/>
+        </div>
+        <div class="form-group" style="margin:0;">
+          <label class="form-label">Ниша / Бизнес</label>
+          <input id="sale-client-niche" class="form-input compact-input" type="text" placeholder="Ресторан, одежда..."/>
+        </div>
+        <div class="form-group" style="margin:0;">
+          <label class="form-label">Instagram</label>
+          <input id="sale-client-instagram" class="form-input compact-input" type="text" placeholder="@username"/>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Тариф и команда ── -->
+    <div class="section-title">📦 Тариф и команда</div>
+    <div class="form-group" style="margin-bottom: 12px;">
+      <label class="form-label">Тариф *</label>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <select id="sale-tariff" class="form-select compact-input" onchange="onSaleTariffChange()" style="flex:1; min-width:0; width:100%; height:36px !important;"><option value="">Выберите тариф</option></select>
+        <button class="btn btn-secondary btn-compact" onclick="toggleTariffBuilder()" style="white-space:nowrap; height:36px; padding:0 12px !important; margin:0; display:inline-flex; align-items:center; justify-content:center; gap:4px; width:auto !important;" title="Собрать кастомный тариф">🛠️ Собрать</button>
+      </div>
+    </div>
+
+    <!-- Hidden Custom Tariff Builder Section -->
+    <div id="tariff-builder-section" style="display:none; background:rgba(255,255,255,0.02); border:1px dashed rgba(255,255,255,0.1); border-radius:12px; padding:14px; margin-bottom:12px;">
+      <div style="font-weight:700; font-size:13px; color:#fff; margin-bottom:10px; display:flex; align-items:center; justify-content:space-between;">
+        <span>🛠️ Конструктор кастомного тарифа</span>
+        <button class="btn-close-mini" onclick="toggleTariffBuilder()" style="background:none; border:none; color:var(--text2); font-size:16px; cursor:pointer;">&times;</button>
+      </div>
+      <div class="form-group" style="margin-bottom:12px;">
+        <label class="form-label">Название тарифа *</label>
+        <input id="custom-tariff-name" class="form-input compact-input" type="text" placeholder="Кастомный тариф — Имя Клиента" style="height:36px !important;"/>
+      </div>
+      <div style="font-size:11px; color:var(--text2); font-weight:700; text-transform:uppercase; margin-bottom:6px; border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:4px;">Услуги в тарифе</div>
+      <div id="custom-tariff-fields-list" style="max-height:200px; overflow-y:auto; display:grid; grid-template-columns:1fr 1fr; gap:8px 12px; margin-bottom:12px; padding-right:4px;">
+        <div style="grid-column:span 2; text-align:center; color:var(--text2); padding:10px 0;"><span class="spinner"></span> Загрузка услуг...</div>
+      </div>
+      <div style="display:grid; grid-template-columns:1.2fr 1fr; gap:12px; align-items:flex-end;">
+        <div class="form-group" style="margin:0;">
+          <label class="form-label">Итоговая стоимость (₸)</label>
+          <input id="custom-tariff-cost" class="form-input compact-input" type="number" placeholder="0" style="height:36px !important;"/>
+        </div>
+        <button id="create-custom-tariff-btn" class="btn btn-primary btn-compact" onclick="saveCustomTariff()" style="background:linear-gradient(135deg,var(--accent),#4f46e5); margin:0; height:36px; font-weight:700; display:inline-flex; align-items:center; justify-content:center; gap:4px;">💾 Создать тариф</button>
+      </div>
+    </div>
+
+    <div class="form-group" style="margin-bottom:16px;">
+      <label class="form-label">Ответственный в производстве</label>
+      <select id="sale-employee" class="form-select compact-input" style="height:36px !important; min-width:0; width:100%;"><option value="">Выберите сотрудника</option></select>
+    </div>
+
+    <!-- ── Финансовая проводка ── -->
+    <div class="section-title">💳 Финансовая проводка</div>
+    <div class="card" style="margin-bottom:16px; padding:14px 16px;">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
+        <div class="form-group" style="margin:0;">
+          <label class="form-label">По договору (₸) *</label>
+          <input id="sale-amount" class="form-input compact-input" type="number" placeholder="500000" style="height:36px !important;"/>
+        </div>
+        <div class="form-group" style="margin:0;">
+          <label class="form-label">В кассу (₸)</label>
+          <input id="sale-paid" class="form-input compact-input" type="number" placeholder="500000" style="height:36px !important;"/>
+        </div>
+      </div>
+      <div class="form-group" style="margin-bottom:10px;">
+        <label class="form-label">Счет / Кошелёк *</label>
+        <select id="sale-account" class="form-select compact-input" style="height:36px !important; min-width:0; width:100%;"><option value="">Загрузка счетов...</option></select>
+      </div>
+      <div class="form-group" style="margin-bottom:10px;">
+        <label class="form-label">Категория дохода</label>
+        <select id="sale-fin-category" class="form-select compact-input" style="height:36px !important; min-width:0; width:100%;"><option value="">— авто по тарифу —</option></select>
+      </div>
+      <div class="form-group" style="margin:0;">
+        <label class="form-label">Примечание к платежу</label>
+        <input id="sale-fin-note" class="form-input compact-input" type="text" placeholder="Комментарий к транзакции (необязательно)" style="height:36px !important;"/>
+      </div>
+    </div>
+
+    <button id="confirm-sale-btn" class="btn btn-primary" onclick="confirmSale()" style="background:linear-gradient(135deg,#10b981,#22c55e);box-shadow:0 4px 15px rgba(16,185,129,0.3); margin-bottom:8px; width:100%;">💰 Подтвердить продажу</button>
+    <button class="btn btn-secondary" onclick="closeDrawer('drawer-sale')" style="width:100%; margin:0;">Отмена</button>
+  </div>
+</div>
+
+<!-- Refund confirmation -->
+<div id="drawer-refund" class="overlay">
+  <div class="drawer">
+    <button class="drawer-close-btn" onclick="closeDrawer('drawer-refund')">&times;</button>
+    <div class="drawer-handle"></div>
+    <div class="drawer-title">↩️ Оформить возврат</div>
+    <input type="hidden" id="refund-lead-id"/>
+    <div id="refund-lead-info" class="card" style="margin-bottom:16px;border-color:rgba(239,68,68,0.3)"></div>
+    <div style="background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);border-radius:12px;padding:14px;margin-bottom:20px;font-size:13px;color:#fca5a5;line-height:1.5">
+      ⚠️ Связанный проект будет отмечен как «Отменён». Лид переместится в колонку «Возвраты» и будет заблокирован.
+    </div>
+    <button id="confirm-refund-btn" class="btn btn-danger" style="background:rgba(239,68,68,0.15);color:#ef4444;border:1px solid rgba(239,68,68,0.3)" onclick="confirmRefund()">↩️ Подтвердить возврат</button>
+    <button class="btn btn-secondary" onclick="closeDrawer('drawer-refund')">Отмена</button>
+  </div>
+</div>
+
+<!-- Reject reason -->
+<!-- Non-target reason modal -->
+<div id="drawer-reject" class="overlay">
+  <div class="drawer">
+    <button class="drawer-close-btn" onclick="cancelReject()">&times;</button>
+    <div class="drawer-handle"></div>
+    <div class="drawer-title">🚫 Почему не целевой?</div>
+    <input type="hidden" id="reject-lead-id"/>
+    <input type="hidden" id="reject-old-stage"/>
+    <div id="reject-lead-info" class="card" style="margin-bottom:16px;border-color:rgba(100,116,139,0.4)"></div>
+    <div class="form-group">
+      <label class="form-label">Укажите причину *</label>
+      <div id="reject-reasons" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px"></div>
+    </div>
+    <div class="form-group" style="margin-top:12px">
+      <label class="form-label">Комментарий (необязательно)</label>
+      <input id="reject-comment" class="form-input" type="text" placeholder="Уточните..."/>
+    </div>
+    <button id="confirm-reject-btn" class="btn btn-secondary" onclick="confirmReject()" style="background:rgba(100,116,139,0.15);color:#94a3b8;border:1px solid rgba(100,116,139,0.35)">🚫 Отметить не целевым</button>
+    <button class="btn btn-secondary" onclick="cancelReject()">Отмена</button>
+  </div>
+</div>
+
+<!-- Add Client -->
+<div id="drawer-client" class="overlay">
+  <div class="drawer">
+    <button class="drawer-close-btn" onclick="closeDrawer('drawer-client')">&times;</button>
+    <div class="drawer-handle"></div>
+    <div class="drawer-title">Новый клиент</div>
+    <div class="form-group"><label class="form-label">Имя *</label><input id="c-name" class="form-input" type="text"/></div>
+    <div class="form-group"><label class="form-label">Ниша</label><input id="c-niche" class="form-input" type="text"/></div>
+    <div class="form-group"><label class="form-label">Телефон</label><input id="c-phone" class="form-input" type="tel"/></div>
+    <div class="form-group"><label class="form-label">Email</label><input id="c-email" class="form-input" type="email"/></div>
+    <div class="form-group"><label class="form-label">Статус</label>
+      <select id="c-status" class="form-select"><option>Активный</option><option>Неактивный</option></select>
+    </div>
+    <button id="save-client-btn" class="btn btn-primary" onclick="saveClient()">Сохранить</button>
+    <button class="btn btn-secondary" onclick="closeDrawer('drawer-client')">Отмена</button>
+  </div>
+</div>
+
+<!-- Add Project -->
+<div id="drawer-deal" class="overlay">
+  <div class="drawer" style="max-height:90vh; overflow-y:auto;">
+    <button class="drawer-close-btn" onclick="closeDrawer('drawer-deal')">&times;</button>
+    <div class="drawer-handle"></div>
+    <div class="drawer-title">📁 Новый проект</div>
+
+    <div class="form-group"><label class="form-label">Название проекта *</label>
+      <input id="d-name" class="form-input" type="text" placeholder="SMM для @brand"/></div>
+
+    <div class="form-group"><label class="form-label">Клиент</label>
+      <select id="d-client" class="form-select"><option value="">Выберите клиента</option></select></div>
+
+    <div class="form-group"><label class="form-label">Статус работы</label>
+      <select id="d-status" class="form-select">
+        <option value="В работе">В работе</option>
+        <option value="На паузе">На паузе</option>
+        <option value="Готово">Готово</option>
+        <option value="Отменён">Отменён</option>
+      </select></div>
+
+    <div class="form-group"><label class="form-label">Тариф</label>
+      <select id="d-tariff" class="form-select"><option value="">Выберите тариф</option></select></div>
+
+    <div class="form-group"><label class="form-label">Ответственный сотрудник</label>
+      <select id="d-employee" class="form-select"><option value="">Выберите сотрудника</option></select></div>
+
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+      <div class="form-group" style="margin:0;"><label class="form-label">💰 Стоимость (₸)</label>
+        <input id="d-amount" class="form-input" type="number" placeholder="0"/></div>
+      <div class="form-group" style="margin:0;"><label class="form-label">📅 Дата начала</label>
+        <input id="d-date-start" class="form-input" type="date" onclick="try{this.showPicker()}catch(e){}"/></div>
+    </div>
+
+    <div class="form-group" style="margin-top:10px;"><label class="form-label">Комментарий</label>
+      <textarea id="d-comment" class="form-input form-textarea" placeholder="Заметки о проекте..."></textarea></div>
+
+    <button id="save-deal-btn" class="btn btn-primary" onclick="saveDeal()">💾 Сохранить проект</button>
+    <button class="btn btn-secondary" onclick="closeDrawer('drawer-deal')">Отмена</button>
+  </div>
+</div>
+
+<!-- Add Operation -->
+<div id="drawer-operation" class="overlay">
+  <div class="drawer">
+    <button class="drawer-close-btn" onclick="closeDrawer('drawer-operation')">&times;</button>
+    <div class="drawer-handle"></div>
+    <div class="drawer-title">Новая операция</div>
+    <div class="form-group"><label class="form-label">Тип *</label>
+      <select id="op-type" class="form-select"><option value="">Выберите тип</option><option>Съёмка</option><option>Монтаж</option><option>Сценарий</option><option>Сторис</option><option>Воронка</option><option>Тредс</option><option>Чат посты</option></select>
+    </div>
+    <div class="form-group"><label class="form-label">Проект</label><select id="op-deal" class="form-select"><option value="">Загрузка...</option></select></div>
+    <div class="form-group"><label class="form-label">Исполнитель</label><select id="op-employee" class="form-select"><option value="">Загрузка...</option></select></div>
+    <div class="form-group"><label class="form-label">Кол-во</label><input id="op-qty" class="form-input" type="number" placeholder="0"/></div>
+    <div class="form-group"><label class="form-label">Часов</label><input id="op-hours" class="form-input" type="number" placeholder="0"/></div>
+    <div class="form-group"><label class="form-label">Статус оплаты</label>
+      <select id="op-pay" class="form-select"><option>Не оплачено</option><option>Оплачено</option><option>Частично</option></select>
+    </div>
+    <button id="save-op-btn" class="btn btn-primary" onclick="saveOperation()">Сохранить</button>
+    <button class="btn btn-secondary" onclick="closeDrawer('drawer-operation')">Отмена</button>
+  </div>
+</div>
+
+<!-- Add Income Drawer -->
+<div id="drawer-income" class="overlay">
+  <div class="drawer" style="max-height: 90vh; overflow-y: auto;">
+    <button class="drawer-close-btn" onclick="closeDrawer('drawer-income')">&times;</button>
+    <div class="drawer-handle"></div>
+    <div class="drawer-title">💰 Добавить Доход</div>
+    
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;">
+      <div class="form-group" style="margin:0;">
+        <label class="form-label">Сумма (касса) *</label>
+        <input id="inc-amount" class="form-input" type="number" placeholder="500000" oninput="document.getElementById('inc-tariff-price').value = this.value" />
+      </div>
+      <div class="form-group" style="margin:0;">
+        <label class="form-label">Выручка по цене *</label>
+        <input id="inc-tariff-price" class="form-input" type="number" placeholder="500000" />
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Дата транзакции *</label>
+      <input id="inc-date" class="form-input" type="date" onclick="try{this.showPicker()}catch(e){}"/>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Счет / Источник *</label>
+      <select id="inc-account" class="form-select"><option value="">Выберите счет</option></select>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Категория / Тариф *</label>
+      <select id="inc-category" class="form-select"><option value="">Выберите категорию</option></select>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Клиент</label>
+      <select id="inc-client" class="form-select" onchange="onIncomeClientChange(this.value)"><option value="">Выберите клиента</option></select>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Заказ / Проект</label>
+      <select id="inc-deal" class="form-select"><option value="">Выберите сделку</option></select>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Менеджер</label>
+      <select id="inc-manager" class="form-select"><option value="">Выберите сотрудника</option></select>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Партнер</label>
+      <input id="inc-partner" class="form-input" type="text" placeholder="Имя партнера" />
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Примечание</label>
+      <textarea id="inc-note" class="form-input form-textarea" placeholder="Детали транзакции..."></textarea>
+    </div>
+
+    <button id="save-income-btn" class="btn btn-primary" onclick="saveIncome()" style="background:linear-gradient(135deg,#10b981,#059669); box-shadow:0 4px 15px rgba(16,185,129,0.3); width: 100%; margin-bottom: 8px;">Сохранить доход</button>
+    <button class="btn btn-secondary" onclick="closeDrawer('drawer-income')" style="width: 100%; margin: 0;">Отмена</button>
+  </div>
+</div>
+
+<!-- Add Expense Drawer -->
+<div id="drawer-expense" class="overlay">
+  <div class="drawer" style="max-height: 90vh; overflow-y: auto;">
+    <button class="drawer-close-btn" onclick="closeDrawer('drawer-expense')">&times;</button>
+    <div class="drawer-handle"></div>
+    <div class="drawer-title">💸 Добавить Расход</div>
+
+    <div class="form-group">
+      <label class="form-label">Сумма (₸) *</label>
+      <input id="exp-amount" class="form-input" type="number" placeholder="50000" />
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Дата транзакции *</label>
+      <input id="exp-date" class="form-input" type="date" onclick="try{this.showPicker()}catch(e){}"/>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Счет / Источник *</label>
+      <select id="exp-account" class="form-select"><option value="">Выберите счет</option></select>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Категория *</label>
+      <select id="exp-category" class="form-select"><option value="">Выберите категорию</option></select>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Сотрудник</label>
+      <select id="exp-employee" class="form-select"><option value="">Выберите сотрудника</option></select>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Заказ / Проект</label>
+      <select id="exp-deal" class="form-select"><option value="">Выберите сделку</option></select>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Бюджет</label>
+      <input id="exp-budget" class="form-input" type="text" placeholder="Напр. Маркетинг, Офис..." />
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Примечание</label>
+      <textarea id="exp-note" class="form-input form-textarea" placeholder="Детали расхода..."></textarea>
+    </div>
+
+    <button id="save-expense-btn" class="btn btn-primary" onclick="saveExpense()" style="background:linear-gradient(135deg,#ef4444,#dc2626); box-shadow:0 4px 15px rgba(239,68,68,0.3); width: 100%; margin-bottom: 8px;">Сохранить расход</button>
+    <button class="btn btn-secondary" onclick="closeDrawer('drawer-expense')" style="width: 100%; margin: 0;">Отмена</button>
+  </div>
+</div>
+
+<!-- Pipeline Settings Drawer -->
+<div id="drawer-pipeline" class="overlay">
+  <div class="drawer" style="max-width: 600px; width: 100%;">
+    <button class="drawer-close-btn" onclick="closeDrawer('drawer-pipeline')">&times;</button>
+    <div class="drawer-handle"></div>
+    <div class="drawer-title">⚙️ Настройка воронок</div>
+    
+    <div class="form-group">
+      <label class="form-label">Выберите воронку</label>
+      <div style="display: flex; gap: 8px;">
+        <select id="ps-pipeline" class="form-select" onchange="loadPipelineStagesToSettings(this.value)" style="flex: 1; margin: 0;"></select>
+        <button class="btn btn-secondary" onclick="renameSelectedPipeline()" style="padding:6px 12px; margin:0;">✏️</button>
+        <button class="btn btn-danger" onclick="deleteSelectedPipeline()" style="padding:6px 12px; margin:0; background:#ef4444; border:none; color:white;">🗑️</button>
+      </div>
+    </div>
+    
+    <div style="margin-bottom: 16px;">
+      <button class="btn btn-secondary" onclick="createNewPipeline()" style="width: 100%; margin: 0;">＋ Создать новую воронку</button>
+    </div>
+    
+    <hr style="border: 0; border-top: 1px solid var(--border); margin: 16px 0;"/>
+    
+    <div class="section-title">Этапы воронки</div>
+    <div id="ps-stages-list" style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; max-height: 400px; overflow-y: auto; padding-right: 4px;">
+      <!-- Dynamic list of stages -->
+    </div>
+    
+    <button class="btn btn-secondary" onclick="addStageToSettingsList()" style="width: 100%; margin-bottom: 20px;">＋ Добавить новый этап</button>
+    
+    <div style="display: flex; gap: 10px;">
+      <button id="save-pipeline-btn" class="btn btn-primary" onclick="savePipelineSettings()" style="flex: 1; margin: 0;">Сохранить изменения</button>
+      <button class="btn btn-secondary" onclick="closeDrawer('drawer-pipeline')" style="flex: 1; margin: 0;">Закрыть</button>
+    </div>
+  </div>
+</div>
+
+<!-- Floating Selection Bar for bulk actions -->
+<div id="selection-bar" class="selection-bar">
+  <div class="selection-bar-content">
+    <span id="selection-count">Выбрано: 0 карточек</span>
+    <div class="selection-bar-actions">
+      <button class="btn btn-primary" onclick="showMoveSelectedMenu(event)" style="background:var(--accent-gradient); padding: 8px 16px; font-size: 13px;">Переместить в...</button>
+      <button class="btn btn-danger" onclick="archiveSelected()" style="background:linear-gradient(135deg,#ef4444,#dc2626); padding: 8px 16px; font-size: 13px;">Архивировать</button>
+      <button class="btn btn-secondary" onclick="cancelSelection()" style="padding: 8px 16px; font-size: 13px;">Отмена</button>
+    </div>
+  </div>
+</div>
+
+<!-- Custom Context Menu for Cards / Columns -->
+<div id="card-context-menu" class="dropdown-menu" style="display:none; position:fixed; z-index:1000;"></div>
+<div id="column-context-menu" class="dropdown-menu" style="display:none; position:fixed; z-index:1000;"></div>
+
+<script src="config.js"></script>
+<script src="airtable.js"></script>
+<script src="finance.js"></script>
+<script src="leads.js"></script>
+<script src="analytics.js"></script>
+<script src="settings.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

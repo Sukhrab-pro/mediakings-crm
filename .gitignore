@@ -1,0 +1,9 @@
+# Секреты — никогда не пушить
+google-credentials.json
+*.json.key
+.env
+.env.*
+
+# macOS
+.DS_Store
+Thumbs.db
