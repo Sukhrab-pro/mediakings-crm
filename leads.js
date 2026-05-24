@@ -883,6 +883,8 @@ function renderKanban(leads) {
             const date    = formatDate(getField(lead.fields, CONFIG.LEAD_FIELDS.date));
             const src     = getField(lead.fields, CONFIG.LEAD_FIELDS.source);
             const budget  = lead.fields['Бюджет'];
+            const igRaw   = lead.fields['Instagram'] || '';
+            const igHandle = igRaw ? ('@' + (igRaw.match(/instagram\.com\/([^/?#\s]+)/)?.[1] || igRaw.replace(/^https?:\/\//,''))) : '';
             const manager = lead.fields['Менеджер'];
             const cd      = lead.fields['Дата консультации'];
             const mgBadge = manager
@@ -905,6 +907,7 @@ function renderKanban(leads) {
                 ${mgBadge}
               </div>
               ${phone  ? `<div class="kanban-card-sub">📱 ${escHtml(phone)}</div>` : ''}
+              ${igHandle ? `<div class="kanban-card-sub" style="color:#c026d3; cursor:pointer;" onclick="event.stopPropagation(); copyInstagram('${escHtml(igRaw)}')">📸 ${escHtml(igHandle)}</div>` : ''}
               ${cd     ? `<div class="kanban-card-sub" style="color:#3b82f6">📅 ${escHtml(cd)} ${escHtml(lead.fields['Время консультации']||'')}</div>` :
                 date    ? `<div class="kanban-card-sub">📋 ${date}</div>` : ''}
               ${budget  ? `<div class="kanban-card-sub" style="color:#34d399">💰 ${Number(budget).toLocaleString('ru-RU')} ₸</div>` : ''}
@@ -1246,6 +1249,15 @@ async function openLeadDetail(id, stage) {
             <input class="form-input compact-input" id="ei-phone" type="tel" value="${escHtml(getField(f,CONFIG.LEAD_FIELDS.phone))}"/>
           </div>
           <div class="form-group">
+            <label class="form-label">📸 Instagram</label>
+            <div style="display:flex; gap:6px; align-items:center;">
+              <input class="form-input compact-input" id="ei-instagram" type="url" placeholder="https://instagram.com/..." value="${escHtml(f['Instagram']||'')}" style="flex:1; min-width:0;"/>
+              ${f['Instagram'] ? `
+              <button class="btn btn-secondary btn-compact" onclick="copyInstagram('${escHtml(f['Instagram'])}')" title="Копировать" style="flex:0 0 32px; width:32px; height:32px; padding:0; display:flex; align-items:center; justify-content:center;">📋</button>
+              <a href="${escHtml(f['Instagram'])}" target="_blank" rel="noopener" class="btn btn-secondary btn-compact" title="Открыть в Instagram" style="flex:0 0 32px; width:32px; height:32px; padding:0; display:flex; align-items:center; justify-content:center; text-decoration:none;">↗️</a>` : ''}
+            </div>
+          </div>
+          <div class="form-group">
             <label class="form-label">Источник</label>
             <input class="form-input compact-input" id="ei-source" value="${escHtml(getField(f,CONFIG.LEAD_FIELDS.source))}"/>
           </div>
@@ -1370,12 +1382,14 @@ async function saveLeadEdit(id) {
   const consultDone = document.getElementById('ei-consult-done')?.checked ?? null;
   const nonTargetEl = document.getElementById('ei-nontarget-reason');
   const recordLink = document.getElementById('ei-record-link')?.value.trim() || null;
+  const instagram  = document.getElementById('ei-instagram')?.value.trim() || null;
   if (budget) fields['Бюджет'] = budget; else fields['Бюджет'] = null;
   if (paid) fields['Оплата'] = paid; else fields['Оплата'] = null;
   fields['Менеджер'] = empId ? empId : [];
   if (consultDone !== null) fields['Консультация проведена'] = consultDone;
   if (nonTargetEl) fields['Причина: Не целевой'] = nonTargetEl.value || null;
   fields['Ссылка на запись'] = recordLink;
+  fields['Instagram'] = instagram;
 
   try {
     await Airtable.update(CONFIG.TABLES.LEADS, id, fields);
@@ -1427,6 +1441,18 @@ async function toggleConsultDone(id) {
 }
 
 // ─── Шаблоны сообщений (WhatsApp)
+function copyInstagram(val) {
+  const text = val || document.getElementById('ei-instagram')?.value.trim();
+  if (!text) return;
+  navigator.clipboard.writeText(text).then(() => toast('Instagram скопирован 📋')).catch(() => {
+    // Fallback for older browsers
+    const el = document.createElement('textarea');
+    el.value = text; document.body.appendChild(el); el.select();
+    document.execCommand('copy'); document.body.removeChild(el);
+    toast('Instagram скопирован 📋');
+  });
+}
+
 function sendTemplate(templateIdx, phone, leadId) {
   const t = MSG_TEMPLATES[templateIdx];
   if (!t) return;
