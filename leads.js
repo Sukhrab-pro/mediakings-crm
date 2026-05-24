@@ -1194,6 +1194,7 @@ async function openLeadDetail(id, stage) {
   const name    = escHtml(getField(f, CONFIG.LEAD_FIELDS.name) || 'Лид');
   const rawPhone = getField(f, CONFIG.LEAD_FIELDS.phone);
   const phone    = rawPhone.replace(/\D/g,'');
+  const waPhone  = phone.startsWith('8') ? '7' + phone.slice(1) : phone;
   const isBlocked = FUNNEL_STAGES.find(s => s.key === stage)?.blocked;
   const isSold    = stage === 'Продано';
 
@@ -1315,8 +1316,8 @@ async function openLeadDetail(id, stage) {
         <!-- Communication -->
         <div class="section-title" style="margin-top:0">Связь</div>
         <div class="comm-block" style="display:flex; flex-direction:column; gap:6px;">
-          ${phone ? `<a href="https://wa.me/${phone}" target="_blank" rel="noopener" class="btn btn-whatsapp btn-compact" style="text-align:center; display:flex; align-items:center; justify-content:center; font-weight:700; text-decoration:none;">📱 WhatsApp</a>` : `<span style="color:var(--text2); font-size:13px; padding:8px 0;">Нет номера</span>`}
-          ${MSG_TEMPLATES.map((t, i) => `<button class="btn btn-template btn-compact" onclick="sendTemplate(${i}, '${phone}', '${id}')" style="width:100%; display:flex; align-items:center; justify-content:center; font-weight:600; font-size:12px;">${escHtml(t.name)}</button>`).join('')}
+          ${phone ? `<a href="https://wa.me/${waPhone}" target="_blank" rel="noopener" class="btn btn-whatsapp btn-compact" style="text-align:center; display:flex; align-items:center; justify-content:center; font-weight:700; text-decoration:none;">📱 WhatsApp</a>` : `<span style="color:var(--text2); font-size:13px; padding:8px 0;">Нет номера</span>`}
+          ${MSG_TEMPLATES.map((t, i) => `<button class="btn btn-template btn-compact" onclick="sendTemplate(${i}, '${waPhone}', '${id}')" style="width:100%; display:flex; align-items:center; justify-content:center; font-weight:600; font-size:12px;">${escHtml(t.name)}</button>`).join('')}
         </div>
 
         <!-- Main Actions -->
@@ -1488,7 +1489,7 @@ function sendTemplate(templateIdx, phone, leadId) {
   const cleanPhone = phone.replace(/\D/g, '');
   const waPhone = cleanPhone.startsWith('8') ? '7' + cleanPhone.slice(1) : cleanPhone;
 
-  const url = `https://wa.me/${waPhone}?text=${encodeURIComponent(text)}`;
+  const url = `https://api.whatsapp.com/send?phone=${waPhone}&text=${encodeURIComponent(text)}`;
   window.open(url, '_blank');
 }
 
