@@ -1302,14 +1302,9 @@ async function openLeadDetail(id, stage) {
       <div class="drawer-right-col">
         <!-- Communication -->
         <div class="section-title" style="margin-top:0">Связь</div>
-        <div class="comm-block" style="display:flex; gap:8px;">
-          ${phone ? `<a href="https://wa.me/${phone}" target="_blank" rel="noopener" class="btn btn-whatsapp btn-compact" style="flex:1; text-align:center; display:inline-flex; align-items:center; justify-content:center; font-weight:700; text-decoration:none;">📱 WhatsApp</a>` : `<span style="color:var(--text2); font-size:13px; padding:8px 0;">Нет номера</span>`}
-          <div class="template-dropdown-wrap" style="flex:1; position:relative;">
-            <button class="btn btn-template btn-compact" onclick="toggleTemplateMenu('${id}')" style="width:100%; display:inline-flex; align-items:center; justify-content:center; font-weight:700;">📋 Шаблоны ▼</button>
-            <div class="template-menu" id="tmpl-menu-${id}" style="display:none; position:absolute; top:100%; left:0; width:100%; z-index:20;">
-              ${MSG_TEMPLATES.map((t, i) => `<button class="template-item" onclick="sendTemplate(${i}, '${phone}')">${escHtml(t.name)}</button>`).join('')}
-            </div>
-          </div>
+        <div class="comm-block" style="display:flex; flex-direction:column; gap:6px;">
+          ${phone ? `<a href="https://wa.me/${phone}" target="_blank" rel="noopener" class="btn btn-whatsapp btn-compact" style="text-align:center; display:flex; align-items:center; justify-content:center; font-weight:700; text-decoration:none;">📱 WhatsApp</a>` : `<span style="color:var(--text2); font-size:13px; padding:8px 0;">Нет номера</span>`}
+          ${MSG_TEMPLATES.map((t, i) => `<button class="btn btn-template btn-compact" onclick="sendTemplate(${i}, '${phone}', '${id}')" style="width:100%; display:flex; align-items:center; justify-content:center; font-weight:600; font-size:12px;">${escHtml(t.name)}</button>`).join('')}
         </div>
 
         <!-- Main Actions -->
@@ -1432,22 +1427,25 @@ async function toggleConsultDone(id) {
 }
 
 // ─── Шаблоны сообщений (WhatsApp)
-function toggleTemplateMenu(leadId) {
-  const menu = document.getElementById('tmpl-menu-' + leadId);
-  if (!menu) return;
-  const isOpen = menu.style.display !== 'none';
-  // Закрыть все открытые меню шаблонов
-  document.querySelectorAll('.template-menu').forEach(m => { m.style.display = 'none'; });
-  if (!isOpen) menu.style.display = 'block';
-}
-
-function sendTemplate(templateIdx, phone) {
+function sendTemplate(templateIdx, phone, leadId) {
   const t = MSG_TEMPLATES[templateIdx];
   if (!t) return;
   if (!phone) { toast('Нет номера телефона', 'error'); return; }
-  const url = `https://wa.me/${phone}?text=${encodeURIComponent(t.text)}`;
+  let text = t.text;
+  if (text.includes('{ССЫЛКА}')) {
+    const lead = State.leads.find(l => l.id === leadId);
+    const link = (lead && lead.fields['Ссылка на запись']) || '';
+    if (link) {
+      text = text.replace('{ССЫЛКА}', link);
+    } else {
+      // Убираем строку со ссылкой если ссылка не указана
+      text = text.replace('\n{ССЫЛКА}\n', '\n').replace('{ССЫЛКА}', '(ссылка не указана)');
+      toast('Ссылка на запись не указана в лиде', 'error');
+      return;
+    }
+  }
+  const url = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
   window.open(url, '_blank');
-  document.querySelectorAll('.template-menu').forEach(m => { m.style.display = 'none'; });
 }
 
 // ─── Открыть модал продажи
