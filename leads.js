@@ -1124,7 +1124,22 @@ async function updateLeadStageOptimistic(id, newStage, oldStage) {
     [stageField]: newStage,
     [stageField + ' ID']: stageId ? String(stageId) : ''
   };
-  
+
+  // ─── Логируем смену этапа в историю
+  if (lead && oldStage !== newStage) {
+    const history = safeJsonParse(lead.fields['История'] || '[]');
+    const currentUser = localStorage.getItem('crm_current_user') || 'Система';
+    history.unshift({
+      date: new Date().toLocaleString('ru-RU'),
+      user: currentUser,
+      type: 'stage_change',
+      details: `Этап: «${oldStage || '—'}» → «${newStage}»`
+    });
+    const historyStr = JSON.stringify(history);
+    apiUpdates['История'] = historyStr;
+    localUpdates['История'] = historyStr;
+  }
+
   if (lead) {
     Object.assign(lead.fields, localUpdates);
     
@@ -1183,6 +1198,320 @@ function updateLeadStage(id, newStage) {
   updateLeadStageOptimistic(id, newStage, oldStage);
 }
 
+// ─── Helper for safe parsing
+function safeJsonParse(str, fallback = []) {
+  if (!str) return fallback;
+  try {
+    if (typeof str === 'object') return str;
+    return JSON.parse(str);
+  } catch (e) {
+    console.error("JSON parse error:", e, str);
+    return fallback;
+  }
+}
+
+// ─── Render Lead Middle Column
+function renderLeadMiddleColumn(lead) {
+  const container = document.getElementById('lead-middle-col-content');
+  if (!container) return;
+
+  const f = lead.fields;
+  const tasks = safeJsonParse(f['Задачи'] || '[]');
+  const comments = safeJsonParse(f['Комментарии_Лог'] || '[]');
+  const history = safeJsonParse(f['История'] || '[]');
+  const id = lead.id;
+
+  // Active user selection
+  const currentUser = localStorage.getItem('crm_current_user') || '';
+  const empOptions = State.employees.map(e => {
+    const name = e.fields['Имя'] || '';
+    return `<option value="${escHtml(name)}" ${currentUser === name ? 'selected' : ''}>${escHtml(name)}</option>`;
+  }).join('');
+
+  const activeTasks = tasks.filter(t => !t.done);
+  const completedTasks = tasks.filter(t => t.done);
+
+  // Sort active tasks by dueDate (ascending)
+  activeTasks.sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
+  // Sort completed tasks by completedAt (descending)
+  completedTasks.sort((a, b) => {
+    // Parser for "dd.mm.yyyy hh:mm"
+    const parseDateTime = (str) => {
+      if (!str) return 0;
+      const parts = str.split(' ');
+      if (parts.length < 2) return 0;
+      const dParts = parts[0].split('.');
+      const tParts = parts[1].split(':');
+      if (dParts.length < 3 || tParts.length < 2) return 0;
+      return new Date(dParts[2], dParts[1] - 1, dParts[0], tParts[0], tParts[1]).getTime();
+    };
+    return parseDateTime(b.completedAt) - parseDateTime(a.completedAt);
+  });
+
+  const todayStr = new Date().toISOString().substring(0, 10);
+
+  const activeTasksHtml = activeTasks.length === 0 
+    ? '<div style="color:var(--text2); font-size:13px; font-style:italic; padding:6px 0;">Нет активных задач</div>'
+    : activeTasks.map(t => {
+        const isOverdue = t.dueDate < todayStr;
+        const isToday = t.dueDate === todayStr;
+        const dueClass = isOverdue ? 'overdue' : (isToday ? 'today' : 'future');
+        const dueLabel = isOverdue ? 'Просрочено: ' : (isToday ? 'Сегодня: ' : 'Срок: ');
+        return `
+          <div class="task-item">
+            <input type="checkbox" class="task-checkbox" onclick="toggleTaskDone('${id}', '${t.id}')">
+            <div class="task-content">
+              <div class="task-text">${escHtml(t.text)}</div>
+              <div class="task-meta">
+                <span>👤 ${escHtml(t.user || '—')}</span>
+                <span class="task-due ${dueClass}">${dueLabel}${formatDate(t.dueDate)}</span>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+  const completedTasksHtml = completedTasks.length === 0
+    ? '<div style="color:var(--text2); font-size:12px; font-style:italic; padding:6px 0;">Нет выполненных задач</div>'
+    : completedTasks.map(t => `
+        <div class="task-item completed">
+          <input type="checkbox" class="task-checkbox" checked onclick="toggleTaskDone('${id}', '${t.id}')">
+          <div class="task-content">
+            <div class="task-text">${escHtml(t.text)}</div>
+            <div class="task-meta">
+              <span>👤 ${escHtml(t.user || '—')}</span>
+              <span>Выполнено: ${escHtml(t.completedAt)}</span>
+            </div>
+          </div>
+        </div>
+      `).join('');
+
+  const commentsHtml = comments.length === 0
+    ? '<div style="color:var(--text2); font-size:13px; font-style:italic; padding:8px 0;">Нет комментариев</div>'
+    : comments.map(c => `
+        <div class="comment-bubble">
+          <div class="comment-header">
+            <span class="comment-user">👤 ${escHtml(c.user || '—')}</span>
+            <span class="comment-date">${escHtml(c.date)}</span>
+          </div>
+          <div class="comment-body">${escHtml(c.text)}</div>
+        </div>
+      `).join('');
+
+  const historyHtml = history.length === 0
+    ? '<div style="color:var(--text2); font-size:12px; font-style:italic; padding:6px 0;">Нет истории</div>'
+    : history.map(h => {
+        let icon = '📝';
+        if (h.type === 'stage_change') icon = '🔄';
+        else if (h.type === 'task_create') icon = '➕';
+        else if (h.type === 'task_done') icon = '✅';
+        else if (h.type === 'comment_add') icon = '💬';
+        else if (h.type === 'edit_fields') icon = '⚙️';
+        
+        return `
+          <div class="history-item">
+            <div class="history-meta">
+              <span>${icon} ${escHtml(h.user || '—')}</span>
+              <span>${escHtml(h.date)}</span>
+            </div>
+            <div class="history-details">${escHtml(h.details)}</div>
+          </div>
+        `;
+      }).join('');
+
+  container.innerHTML = `
+    <!-- User Selector -->
+    <div class="user-selector-container">
+      <span style="font-weight:700">Кто делает:</span>
+      <select id="lead-current-user" class="form-select compact-input" style="flex:1; padding:4px 8px !important; height:28px !important; font-size:12px !important; margin:0;" onchange="localStorage.setItem('crm_current_user', this.value)">
+        <option value="">— Выберите себя —</option>
+        ${empOptions}
+      </select>
+    </div>
+
+    <!-- Active Tasks -->
+    <div class="middle-col-section">
+      <div class="section-subtitle">📋 Задачи</div>
+      <div class="active-tasks-list">${activeTasksHtml}</div>
+      
+      <!-- Add Task Form -->
+      <div class="inline-form" style="margin-top:12px; padding:10px; background:rgba(255,255,255,0.02); border-radius:8px; border:1px solid rgba(255,255,255,0.04)">
+        <div style="font-size:12px; font-weight:700; color:var(--text2); margin-bottom:6px;">Новая задача:</div>
+        <input type="text" id="ei-new-task-text" class="form-input compact-input" placeholder="Что нужно сделать..." style="width:100%; margin-bottom:6px; min-height: unset !important;">
+        <div class="inline-form-row">
+          <input type="date" id="ei-new-task-date" class="form-input compact-input" onclick="try{this.showPicker()}catch(e){}" style="flex:1;">
+          <button class="btn btn-save-compact" onclick="addLeadTask('${id}')" style="padding:6px 12px !important; font-size:12px !important; height:34px !important;">Добавить</button>
+        </div>
+      </div>
+
+      <!-- Completed Tasks Collapsible -->
+      <details style="margin-top:10px; cursor:pointer;">
+        <summary style="font-size:12px; color:var(--text2); font-weight:600; outline:none; padding:4px 0;">Выполненные задачи (${completedTasks.length})</summary>
+        <div style="margin-top:8px; max-height:150px; overflow-y:auto; padding-right:4px;">${completedTasksHtml}</div>
+      </details>
+    </div>
+
+    <!-- Comments -->
+    <div class="middle-col-section">
+      <div class="section-subtitle">💬 Комментарии</div>
+      
+      <!-- Add Comment Form -->
+      <div class="inline-form" style="margin-bottom:12px;">
+        <textarea id="ei-new-comment" class="form-input compact-input" placeholder="Напишите комментарий..." style="height:60px !important; min-height:60px !important; width:100%; resize:vertical;"></textarea>
+        <div style="display:flex; justify-content:flex-end; margin-top: 6px;">
+          <button class="btn btn-save-compact" onclick="addLeadComment('${id}')" style="padding:6px 12px !important; font-size:12px !important;">Отправить</button>
+        </div>
+      </div>
+
+      <div class="comments-list">${commentsHtml}</div>
+    </div>
+
+    <!-- History -->
+    <div class="middle-col-section">
+      <div class="section-subtitle">📜 История изменений</div>
+      <div class="history-list">${historyHtml}</div>
+    </div>
+  `;
+}
+
+// ─── Actions for Lead Tasks/Comments
+async function addLeadComment(id) {
+  const textEl = document.getElementById('ei-new-comment');
+  const text = textEl?.value.trim();
+  if (!text) return;
+
+  const lead = State.leads.find(l => l.id === id);
+  if (!lead) return;
+
+  const currentUser = localStorage.getItem('crm_current_user') || 'Система';
+  const dateStr = new Date().toLocaleString('ru-RU');
+
+  const comments = safeJsonParse(lead.fields['Комментарии_Лог'] || '[]');
+  comments.unshift({
+    date: dateStr,
+    user: currentUser,
+    text: text
+  });
+
+  const history = safeJsonParse(lead.fields['История'] || '[]');
+  history.unshift({
+    date: dateStr,
+    user: currentUser,
+    type: 'comment_add',
+    details: `Добавлен комментарий: "${text.substring(0, 60)}${text.length > 60 ? '...' : ''}"`
+  });
+
+  const updates = {
+    'Комментарии_Лог': JSON.stringify(comments),
+    'История': JSON.stringify(history)
+  };
+
+  textEl.value = '';
+
+  try {
+    await Airtable.update(CONFIG.TABLES.LEADS, id, updates);
+    Object.assign(lead.fields, updates);
+    renderLeadMiddleColumn(lead);
+    toast('Комментарий добавлен ✓');
+  } catch (e) {
+    toast('Ошибка добавления комментария: ' + e.message, 'error');
+  }
+}
+
+async function addLeadTask(id) {
+  const textEl = document.getElementById('ei-new-task-text');
+  const dateEl = document.getElementById('ei-new-task-date');
+  const text = textEl?.value.trim();
+  const dueDate = dateEl?.value;
+
+  if (!text) { toast('Введите текст задачи', 'error'); return; }
+  if (!dueDate) { toast('Выберите срок выполнения', 'error'); return; }
+
+  const lead = State.leads.find(l => l.id === id);
+  if (!lead) return;
+
+  const currentUser = localStorage.getItem('crm_current_user') || 'Система';
+  const dateStr = new Date().toLocaleString('ru-RU');
+
+  const tasks = safeJsonParse(lead.fields['Задачи'] || '[]');
+  const newTask = {
+    id: 't_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+    text: text,
+    dueDate: dueDate,
+    done: false,
+    createdAt: dateStr,
+    completedAt: '',
+    user: currentUser
+  };
+  tasks.push(newTask);
+
+  const history = safeJsonParse(lead.fields['История'] || '[]');
+  history.unshift({
+    date: dateStr,
+    user: currentUser,
+    type: 'task_create',
+    details: `Создана задача: "${text}" (срок: ${formatDate(dueDate)})`
+  });
+
+  const updates = {
+    'Задачи': JSON.stringify(tasks),
+    'История': JSON.stringify(history)
+  };
+
+  textEl.value = '';
+  dateEl.value = '';
+
+  try {
+    await Airtable.update(CONFIG.TABLES.LEADS, id, updates);
+    Object.assign(lead.fields, updates);
+    renderLeadMiddleColumn(lead);
+    toast('Задача добавлена ✓');
+  } catch (e) {
+    toast('Ошибка добавления задачи: ' + e.message, 'error');
+  }
+}
+
+async function toggleTaskDone(leadId, taskId) {
+  const lead = State.leads.find(l => l.id === leadId);
+  if (!lead) return;
+
+  const currentUser = localStorage.getItem('crm_current_user') || 'Система';
+  const dateStr = new Date().toLocaleString('ru-RU');
+
+  const tasks = safeJsonParse(lead.fields['Задачи'] || '[]');
+  const task = tasks.find(t => t.id === taskId);
+  if (!task) return;
+
+  task.done = !task.done;
+  task.completedAt = task.done ? dateStr : '';
+
+  const history = safeJsonParse(lead.fields['История'] || '[]');
+  history.unshift({
+    date: dateStr,
+    user: currentUser,
+    type: 'task_done',
+    details: task.done ? `Выполнена задача: "${task.text}"` : `Задача возвращена в работу: "${task.text}"`
+  });
+
+  const updates = {
+    'Задачи': JSON.stringify(tasks),
+    'История': JSON.stringify(history)
+  };
+
+  try {
+    await Airtable.update(CONFIG.TABLES.LEADS, leadId, updates);
+    Object.assign(lead.fields, updates);
+    renderLeadMiddleColumn(lead);
+    toast(task.done ? 'Задача выполнена ✓' : 'Задача возвращена в работу');
+  } catch (e) {
+    toast('Ошибка обновления задачи: ' + e.message, 'error');
+  }
+}
+
+// Expose these functions to window context
+window.addLeadComment = addLeadComment;
+window.addLeadTask = addLeadTask;
+window.toggleTaskDone = toggleTaskDone;
 
 // ─── Lead detail drawer
 async function openLeadDetail(id, stage) {
@@ -1237,10 +1566,10 @@ async function openLeadDetail(id, stage) {
         </label>
       </div>` : ''}
 
-    <div class="drawer-main-layout">
-      <!-- LEFT COLUMN: Grid Fields -->
+    <div class="drawer-three-cols">
+      <!-- LEFT COLUMN: Fields strictly stacked vertically -->
       <div class="drawer-left-col">
-        <div class="grid-fields">
+        <div class="grid-fields-single">
           <div class="form-group">
             <label class="form-label">Имя</label>
             <input class="form-input compact-input" id="ei-name" value="${escHtml(getField(f,CONFIG.LEAD_FIELDS.name))}"/>
@@ -1312,6 +1641,11 @@ async function openLeadDetail(id, stage) {
         </div>
       </div>
 
+      <!-- MIDDLE COLUMN: Comments, Tasks, History -->
+      <div class="drawer-middle-col" id="lead-middle-col-content">
+        <!-- Rendered dynamically -->
+      </div>
+
       <!-- RIGHT COLUMN: Actions & Tools -->
       <div class="drawer-right-col">
         <!-- Communication -->
@@ -1344,6 +1678,7 @@ async function openLeadDetail(id, stage) {
   `;
 
   openDrawer('drawer-detail');
+  renderLeadMiddleColumn(lead);
 }
 
 // ─── Сохранить редактирование лида
@@ -1393,6 +1728,44 @@ async function saveLeadEdit(id) {
   fields['Ссылка на запись'] = recordLink;
   fields['Instagram'] = instagram;
 
+  // ─── Логируем изменения полей в историю
+  const changedFieldsList = [];
+  const fieldsToCheck = [
+    { key: 'Имя',                    label: 'Имя' },
+    { key: 'Телефон',                label: 'Телефон' },
+    { key: 'Источник',               label: 'Источник' },
+    { key: 'Бюджет',                 label: 'Бюджет' },
+    { key: 'Оплата',                 label: 'Оплачено' },
+    { key: 'Дата консультации',      label: 'Дата консультации' },
+    { key: 'Время консультации',     label: 'Время консультации' },
+    { key: 'Дата назначения',        label: 'Дата назначения' },
+    { key: 'Ссылка на запись',       label: 'Ссылка на запись' },
+    { key: 'Instagram',              label: 'Instagram' },
+    { key: 'Причина: Не целевой',   label: 'Причина нецелевого' },
+    { key: 'Консультация проведена', label: 'Консультация проведена' },
+  ];
+  for (const fld of fieldsToCheck) {
+    const oldVal = String(lead.fields[fld.key] ?? '');
+    const newVal = String(fields[fld.key] ?? '');
+    if (oldVal !== newVal) changedFieldsList.push(`${fld.label}: «${oldVal || '—'}» → «${newVal || '—'}»`);
+  }
+  // Менеджер отдельно — сравниваем по имени
+  const oldMgr = lead.fields['Менеджер'] || '';
+  const newMgr = emp ? (emp.fields['Имя'] || '') : '';
+  if (oldMgr !== newMgr) changedFieldsList.push(`Менеджер: «${oldMgr || '—'}» → «${newMgr || '—'}»`);
+
+  if (changedFieldsList.length > 0) {
+    const history = safeJsonParse(lead.fields['История'] || '[]');
+    const currentUser = localStorage.getItem('crm_current_user') || 'Система';
+    history.unshift({
+      date: new Date().toLocaleString('ru-RU'),
+      user: currentUser,
+      type: 'edit_fields',
+      details: 'Изменены поля: ' + changedFieldsList.join('; ')
+    });
+    fields['История'] = JSON.stringify(history);
+  }
+
   try {
     await Airtable.update(CONFIG.TABLES.LEADS, id, fields);
     Object.assign(lead.fields, fields);
@@ -1405,9 +1778,12 @@ async function saveLeadEdit(id) {
     if (consultDone !== null) lead.fields['Консультация проведена'] = consultDone;
     if (nonTargetEl) lead.fields['Причина: Не целевой'] = nonTargetEl.value || '';
     if (recordLink !== null) lead.fields['Ссылка на запись'] = recordLink;
+    if (fields['История']) lead.fields['История'] = fields['История'];
+    if (instagram !== null) lead.fields['Instagram'] = instagram || '';
 
     renderKanban(State.leads);
     renderLeadsStats();
+    renderLeadMiddleColumn(lead);
     toast('Изменения сохранены ✓');
   } catch(e) { toast('Ошибка: ' + e.message, 'error'); }
 }
