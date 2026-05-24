@@ -1969,6 +1969,7 @@ async function saveLead() {
     const apiFields = {
       'Имя':       name,
       'Телефон':   document.getElementById('l-phone').value.trim(),
+      'Instagram': document.getElementById('l-instagram')?.value.trim() || '',
       'Источник':  document.getElementById('l-source').value.trim(),
       'Комментарий': document.getElementById('l-comment').value.trim(),
       'Воронка':   stageId,
@@ -2006,7 +2007,7 @@ async function saveLead() {
     toast('🎯 Лид добавлен ✓');
 
     // Сбрасываем форму
-    ['l-name','l-phone','l-source','l-budget','l-comment','l-consult-date','l-consult-time']
+    ['l-name','l-phone','l-instagram','l-source','l-budget','l-comment','l-consult-date','l-consult-time']
       .forEach(i => { const el = document.getElementById(i); if(el) el.value = ''; });
     const mgSel = document.getElementById('l-manager');
     if (mgSel) mgSel.value = '';
