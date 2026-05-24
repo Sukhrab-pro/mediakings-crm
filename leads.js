@@ -1431,20 +1431,27 @@ function sendTemplate(templateIdx, phone, leadId) {
   const t = MSG_TEMPLATES[templateIdx];
   if (!t) return;
   if (!phone) { toast('Нет номера телефона', 'error'); return; }
+
+  const lead = leadId ? State.leads.find(l => l.id === leadId) : null;
+  const f = lead ? lead.fields : {};
+
   let text = t.text;
-  if (text.includes('{ССЫЛКА}')) {
-    const lead = State.leads.find(l => l.id === leadId);
-    const link = (lead && lead.fields['Ссылка на запись']) || '';
-    if (link) {
-      text = text.replace('{ССЫЛКА}', link);
-    } else {
-      // Убираем строку со ссылкой если ссылка не указана
-      text = text.replace('\n{ССЫЛКА}\n', '\n').replace('{ССЫЛКА}', '(ссылка не указана)');
-      toast('Ссылка на запись не указана в лиде', 'error');
-      return;
-    }
+  // Подставляем имя клиента
+  if (text.includes('{ИМЯ}')) {
+    const name = (f['Имя'] || '').split(' ')[0] || 'Клиент';
+    text = text.replace(/{ИМЯ}/g, name);
   }
-  const url = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
+  // Подставляем время консультации
+  if (text.includes('{ВРЕМЯ}')) {
+    const time = f['Время консультации'] || '—';
+    text = text.replace(/{ВРЕМЯ}/g, time);
+  }
+
+  // Нормализуем номер: 8XXXXXXXXXX → 7XXXXXXXXXX
+  const cleanPhone = phone.replace(/\D/g, '');
+  const waPhone = cleanPhone.startsWith('8') ? '7' + cleanPhone.slice(1) : cleanPhone;
+
+  const url = `https://wa.me/${waPhone}?text=${encodeURIComponent(text)}`;
   window.open(url, '_blank');
 }
 
