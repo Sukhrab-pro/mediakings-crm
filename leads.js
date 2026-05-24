@@ -1472,6 +1472,17 @@ function sendTemplate(templateIdx, phone, leadId) {
     const time = f['Время консультации'] || '—';
     text = text.replace(/{ВРЕМЯ}/g, time);
   }
+  // Подставляем ссылку на запись встречи (календарь)
+  if (text.includes('{ССЫЛКА}')) {
+    const link = f['Ссылка на запись'] || '';
+    if (link) {
+      text = text.replace(/{ССЫЛКА}/g, link);
+    } else {
+      text = text.replace(/\n{ССЫЛКА}\n/g, '\n').replace(/{ССЫЛКА}/g, '(ссылка не указана)');
+      toast('Ссылка на запись не указана в лиде', 'error');
+      return;
+    }
+  }
 
   // Нормализуем номер: 8XXXXXXXXXX → 7XXXXXXXXXX
   const cleanPhone = phone.replace(/\D/g, '');

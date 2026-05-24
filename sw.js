@@ -1,8 +1,37 @@
-const CACHE = 'mk-crm-v45';
-const ASSETS = ['./', './index.html', './config.js', './airtable.js', './finance.js', './leads.js', './analytics.js', './settings.js', './app.js', './style.css', './sw.js'];
+const CACHE = 'mk-crm-v46';
+const ASSETS = [
+  './',
+  './index.html',
+  './config.js',
+  './airtable.js',
+  './finance.js',
+  './leads.js',
+  './analytics.js',
+  './settings.js',
+  './app.js',
+  './style.css',
+  './sw.js'
+];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));
+  e.waitUntil(
+    caches.open(CACHE).then(c => {
+      return Promise.all(
+        ASSETS.map(url => {
+          // Force network fetch to bypass browser HTTP/CDN cache
+          const requestUrl = url + (url.indexOf('?') > -1 ? '&' : '?') + 't=' + Date.now();
+          return fetch(requestUrl, { cache: 'reload' }).then(response => {
+            if (!response.ok) throw new Error(`Request failed for ${url}`);
+            return c.put(url, response);
+          }).catch(err => {
+            console.error('Failed to cache with reload:', url, err);
+            // Fallback to standard request if reload fails
+            return c.add(url);
+          });
+        })
+      );
+    })
+  );
   self.skipWaiting();
 });
 
