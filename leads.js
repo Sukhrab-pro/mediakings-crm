@@ -1252,9 +1252,10 @@ async function openLeadDetail(id, stage) {
           <div class="form-group">
             <label class="form-label">📸 Instagram</label>
             <div style="display:flex; gap:6px; align-items:center;">
-              <input class="form-input compact-input" id="ei-instagram" type="url" placeholder="https://instagram.com/..." value="${escHtml(f['Instagram']||'')}" style="flex:1; min-width:0;"/>
+              <input class="form-input compact-input" id="ei-instagram" type="text" placeholder="Никнейм или ссылка" value="${escHtml(f['Instagram']||'')}" style="flex:1; min-width:0;"/>
               ${f['Instagram'] ? `
-              <button class="btn btn-secondary btn-compact" onclick="copyInstagram('${escHtml(f['Instagram'])}')" title="Копировать" style="flex:0 0 32px; width:32px; height:32px; padding:0; display:flex; align-items:center; justify-content:center;">📋</button>
+              <button class="btn btn-secondary btn-compact" onclick="copyInstagram('${escHtml(f['Instagram'])}')" title="Копировать" style="flex:0 0 32px; width:32px; height:32px; padding:0; display:flex; align-items:center; justify-content:center;">📋</button>` : ''}
+              ${f['Instagram'] && (f['Instagram'].startsWith('http://') || f['Instagram'].startsWith('https://')) ? `
               <a href="${escHtml(f['Instagram'])}" target="_blank" rel="noopener" class="btn btn-secondary btn-compact" title="Открыть в Instagram" style="flex:0 0 32px; width:32px; height:32px; padding:0; display:flex; align-items:center; justify-content:center; text-decoration:none;">↗️</a>` : ''}
             </div>
           </div>
@@ -2272,7 +2273,7 @@ async function openDealDetail(id) {
           </div>
           <div class="form-group form-group-full">
             <label class="form-label">📸 Instagram</label>
-            <input class="form-input compact-input" id="dp-instagram" type="url" placeholder="https://instagram.com/..." value="${escHtml(f['Ссылка на Инстаграм']||'')}"/>
+            <input class="form-input compact-input" id="dp-instagram" type="text" placeholder="Никнейм или ссылка" value="${escHtml(f['Ссылка на Инстаграм']||'')}"/>
           </div>
           <div class="form-group form-group-full" style="margin-bottom:0">
             <label class="form-label">Комментарий</label>
