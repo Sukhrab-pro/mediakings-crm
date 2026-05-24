@@ -1911,4 +1911,183 @@ textarea.compact-input {
 }
 
 
+/* ════════════════════════════════════════════════════════
+   MOBILE OPTIMIZATIONS  ≤ 767px
+   Цель: стата = тонкая горизонтальная полоска (~55px),
+         фильтр = компактная прокручиваемая строка,
+         80% экрана = канбан
+   ════════════════════════════════════════════════════════ */
+@media (max-width: 767px) {
+
+  /* ── Page padding ───────────────────────────── */
+  .page {
+    padding: 8px 10px;
+    padding-bottom: 80px;
+  }
+
+  /* ── Header ─────────────────────────────────── */
+  .header {
+    padding: 6px 12px;
+    min-height: 44px;
+  }
+  .header h1 { font-size: 15px; }
+  .header-sub { font-size: 9px; }
+  .header-logo { font-size: 18px; }
+  .header-btn {
+    font-size: 10px;
+    padding: 4px 8px;
+    gap: 3px;
+  }
+
+  /* ── Stats: горизонтальный скролл чипов ─────── */
+  .stats-grid {
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    grid-template-columns: unset !important;
+    overflow-x: auto !important;
+    gap: 6px !important;
+    margin-bottom: 8px !important;
+    padding-bottom: 3px;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .stats-grid::-webkit-scrollbar { display: none; }
+
+  .stat-card {
+    flex: 0 0 auto !important;
+    width: 80px !important;
+    min-width: 80px !important;
+    max-width: 80px !important;
+    min-height: unset !important;
+    padding: 7px 5px !important;
+    border-radius: 10px !important;
+    gap: 2px !important;
+  }
+
+  .stat-card-title {
+    font-size: 8.5px !important;
+    line-height: 1.15 !important;
+    white-space: normal;
+    text-align: center;
+  }
+
+  .stat-card-num {
+    font-size: 15px !important;
+    white-space: nowrap;
+  }
+
+  /* Скрываем подстроки "В кассу / X сделок" на мобиле — слишком много */
+  .stat-card-sub { display: none !important; }
+
+  /* ── Pipeline select + archive toggle ───────── */
+  #page-leads > div:nth-child(2) {
+    margin-top: 2px !important;
+    margin-bottom: 6px !important;
+    flex-wrap: nowrap !important;
+    gap: 6px !important;
+  }
+
+  #pipeline-select {
+    font-size: 14px !important;
+    padding-right: 20px !important;
+  }
+
+  .archive-toggle-label {
+    font-size: 11px !important;
+    gap: 5px !important;
+    white-space: nowrap;
+  }
+
+  /* ── Filter bar: горизонтальный скролл ──────── */
+  .leads-filter-bar {
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    padding: 6px 8px !important;
+    gap: 6px !important;
+    margin-bottom: 6px !important;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .leads-filter-bar::-webkit-scrollbar { display: none; }
+
+  /* Скрываем текстовые лейблы — инпуты и так понятны */
+  .filter-label { display: none !important; }
+
+  .filter-group {
+    flex-shrink: 0;
+    min-width: 0;
+  }
+
+  .filter-group-search { min-width: 120px !important; }
+
+  .filter-input,
+  .filter-select {
+    height: 28px !important;
+    font-size: 11px !important;
+    padding: 3px 6px !important;
+    min-width: 90px;
+  }
+
+  /* Кнопка сброса фильтров */
+  #flt-clear-btn {
+    height: 28px !important;
+    padding: 0 8px !important;
+    font-size: 11px !important;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  /* ── Kanban board ───────────────────────────── */
+  .kanban-wrap {
+    /* Занимает максимум оставшегося места */
+    min-height: 0;
+    flex: 1;
+  }
+
+  .kanban-col {
+    min-width: 200px !important;
+    max-width: 220px !important;
+  }
+
+  .kanban-col-header {
+    padding: 8px 10px !important;
+  }
+
+  .kanban-card {
+    padding: 9px 10px !important;
+  }
+
+  .kanban-card-name {
+    font-size: 13px !important;
+  }
+
+  .kanban-card-phone,
+  .kanban-card-date {
+    font-size: 11px !important;
+  }
+
+  /* ── Cards on list pages ─────────────────────── */
+  .card {
+    padding: 10px 12px !important;
+  }
+
+  .card-title { font-size: 14px !important; }
+  .card-sub   { font-size: 11px !important; }
+
+  /* ── Bottom nav compact ──────────────────────── */
+  .bottom-nav {
+    padding: 4px 0 calc(4px + env(safe-area-inset-bottom));
+  }
+
+  .nav-item {
+    font-size: 9px !important;
+    padding: 4px 0 !important;
+    gap: 1px !important;
+  }
+
+  .nav-item .icon { font-size: 18px !important; }
+
+}
 
