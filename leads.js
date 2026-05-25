@@ -1127,21 +1127,25 @@ function initTouchDrag() {
       
       // Horizontal scroll (.kanban-wrap)
       if (wrap) {
-        if (lastTouchX < 70) {
-          wrap.scrollLeft -= 12;
+        if (lastTouchX < 80) {
+          const speed = Math.max(4, Math.min(20, Math.round((80 - lastTouchX) / 3)));
+          wrap.scrollLeft -= speed;
           scrolled = true;
-        } else if (lastTouchX > window.innerWidth - 70) {
-          wrap.scrollLeft += 12;
+        } else if (lastTouchX > window.innerWidth - 80) {
+          const speed = Math.max(4, Math.min(20, Math.round((lastTouchX - (window.innerWidth - 80)) / 3)));
+          wrap.scrollLeft += speed;
           scrolled = true;
         }
       }
       
       // Vertical scroll (page window)
-      if (lastTouchY < 100) {
-        window.scrollBy(0, -15);
+      if (lastTouchY < 140) {
+        const speed = Math.max(5, Math.min(25, Math.round((140 - lastTouchY) / 4)));
+        window.scrollBy(0, -speed);
         scrolled = true;
-      } else if (lastTouchY > window.innerHeight - 100) {
-        window.scrollBy(0, 15);
+      } else if (lastTouchY > window.innerHeight - 140) {
+        const speed = Math.max(5, Math.min(25, Math.round((lastTouchY - (window.innerHeight - 140)) / 4)));
+        window.scrollBy(0, speed);
         scrolled = true;
       }
       
