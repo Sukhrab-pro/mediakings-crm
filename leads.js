@@ -1015,9 +1015,8 @@ function reorderLocalLeads(leadId, beforeId) {
 
 async function moveBaserowRow(tableId, rowId, beforeId) {
   try {
-    await Baserow.req('PATCH', `/database/rows/table/${tableId}/${rowId}/move/`, {
-      before_id: beforeId ? parseInt(beforeId, 10) : null
-    });
+    const query = beforeId ? `?before_id=${parseInt(beforeId, 10)}` : '';
+    await Baserow.req('PATCH', `/database/rows/table/${tableId}/${rowId}/move/${query}`);
   } catch (err) {
     console.error('Failed to move row in Baserow:', err);
   }
