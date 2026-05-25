@@ -957,34 +957,48 @@ function initCardClicks() {
   });
 }
 
+// ─── Shared Drag & Drop Placeholder Helpers
+let dragPlaceholderEl = null;
+
+function getDragPlaceholder() {
+  if (!dragPlaceholderEl) {
+    dragPlaceholderEl = document.createElement('div');
+    dragPlaceholderEl.id = 'drag-ph';
+    dragPlaceholderEl.style.cssText = [
+      'height:4px', 'border-radius:99px',
+      'background:var(--accent)',
+      'box-shadow:0 0 10px rgba(99,102,241,0.7)',
+      'margin:6px 2px', 'pointer-events:none',
+      'flex-shrink:0', 'transition:opacity 0.1s',
+    ].join(';');
+  }
+  return dragPlaceholderEl;
+}
+
+function removeDragPlaceholder() {
+  const ph = getDragPlaceholder();
+  if (ph.parentNode) ph.remove();
+}
+
+function placeDragPlaceholder(colBody, clientY) {
+  const ph = getDragPlaceholder();
+  const cards = [...colBody.querySelectorAll('.kanban-card')].filter(c => !c.classList.contains('dragging'));
+  if (!cards.length) {
+    colBody.appendChild(ph);
+    return;
+  }
+  for (const c of cards) {
+    const r = c.getBoundingClientRect();
+    if (clientY < r.top + r.height / 2) {
+      colBody.insertBefore(ph, c);
+      return;
+    }
+  }
+  colBody.appendChild(ph);
+}
+
 // ─── Drag & Drop (Desktop) — с плейсхолдером между карточками
 function initDragDrop() {
-  // Создаём один плейсхолдер на весь kanban
-  const ph = document.createElement('div');
-  ph.id = 'drag-ph';
-  ph.style.cssText = [
-    'height:3px', 'border-radius:99px',
-    'background:var(--accent)',
-    'box-shadow:0 0 10px rgba(99,102,241,0.7)',
-    'margin:3px 2px', 'pointer-events:none',
-    'flex-shrink:0', 'transition:opacity 0.1s',
-  ].join(';');
-
-  function removePh() { if (ph.parentNode) ph.remove(); }
-
-  // Вставляем плейсхолдер в правильное место внутри colBody по позиции мыши
-  function placePh(colBody, clientY) {
-    const cards = [...colBody.querySelectorAll('.kanban-card')];
-    if (!cards.length) { colBody.appendChild(ph); return; }
-    for (const c of cards) {
-      const r = c.getBoundingClientRect();
-      if (clientY < r.top + r.height / 2) {
-        colBody.insertBefore(ph, c); return;
-      }
-    }
-    colBody.appendChild(ph);
-  }
-
   // ── Карточки
   document.querySelectorAll('.kanban-card').forEach(card => {
     card.addEventListener('dragstart', e => {
@@ -997,7 +1011,7 @@ function initDragDrop() {
     card.addEventListener('dragend', () => {
       card.classList.remove('dragging');
       document.querySelectorAll('.kanban-col').forEach(c => c.classList.remove('drag-over'));
-      removePh();
+      removeDragPlaceholder();
     });
   });
 
@@ -1010,22 +1024,27 @@ function initDragDrop() {
       e.preventDefault();
       e.dataTransfer.dropEffect = isBlocked() ? 'none' : 'move';
       document.querySelectorAll('.kanban-col').forEach(c => c.classList.remove('drag-over'));
-      col.classList.add('drag-over');
-      if (!isBlocked()) placePh(colBody, e.clientY);
-      else removePh();
+      
+      // Highlight with drag-over ONLY if it is a DIFFERENT stage/column
+      if (col.dataset.stage !== DragState.fromStage) {
+        col.classList.add('drag-over');
+      }
+      
+      if (!isBlocked()) placeDragPlaceholder(colBody, e.clientY);
+      else removeDragPlaceholder();
     });
 
     col.addEventListener('dragleave', e => {
       if (!col.contains(e.relatedTarget)) {
         col.classList.remove('drag-over');
-        removePh();
+        removeDragPlaceholder();
       }
     });
 
     col.addEventListener('drop', e => {
       e.preventDefault();
       document.querySelectorAll('.kanban-col').forEach(c => c.classList.remove('drag-over'));
-      removePh();
+      removeDragPlaceholder();
       const newStage     = col.dataset.stage;
       const toBlocked    = col.dataset.blocked === '1';
       const fromStageObj = FUNNEL_STAGES.find(s => s.key === DragState.fromStage);
@@ -1102,9 +1121,13 @@ function initTouchDrag() {
         const rect = card.getBoundingClientRect();
         ghost = card.cloneNode(true);
         ghost.style.cssText = `position:fixed;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;z-index:9999;pointer-events:none;opacity:0.85;transform:scale(1.04) rotate(1deg);box-shadow:0 10px 30px rgba(0,0,0,0.6);border-radius:8px;`;
-        document.body.appendChild(ghost); card.style.opacity='0.3'; navigator.vibrate?.(60);
+        document.body.appendChild(ghost);
+        card.style.opacity='0.3';
+        card.classList.add('dragging');
+        navigator.vibrate?.(60);
       }, 400);
     }, { passive: true });
+
     card.addEventListener('touchmove', e => {
       if (!ghost) { clearTimeout(timer); return; }
       e.preventDefault();
@@ -1120,16 +1143,40 @@ function initTouchDrag() {
       ghost.style.display = 'none';
       const el = document.elementFromPoint(touch.clientX, touch.clientY);
       ghost.style.display = '';
+      
+      const col = el?.closest('.kanban-col');
       document.querySelectorAll('.kanban-col').forEach(c => c.classList.remove('drag-over'));
-      el?.closest('.kanban-col')?.classList.add('drag-over');
+      
+      if (col) {
+        const isBlocked = col.dataset.blocked === '1';
+        const colBody = col.querySelector('.kanban-col-body');
+        
+        // Highlight with drag-over ONLY if it is a DIFFERENT stage/column
+        if (col.dataset.stage !== DragState.fromStage) {
+          col.classList.add('drag-over');
+        }
+        
+        if (!isBlocked) {
+          placeDragPlaceholder(colBody, touch.clientY);
+        } else {
+          removeDragPlaceholder();
+        }
+      } else {
+        removeDragPlaceholder();
+      }
     }, { passive: false });
+
     const endDrag = e => {
       clearTimeout(timer);
       stopAutoScroll();
       document.querySelectorAll('.kanban-col').forEach(c => c.classList.remove('drag-over'));
+      removeDragPlaceholder();
+      
       if (!ghost) return;
       const touch = (e.changedTouches||e.touches)[0];
       ghost.remove(); ghost = null; card.style.opacity = '';
+      card.classList.remove('dragging');
+      
       const el  = document.elementFromPoint(touch.clientX, touch.clientY);
       const targetCol = el?.closest('.kanban-col');
       const newStage  = targetCol?.dataset.stage;
