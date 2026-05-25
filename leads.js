@@ -960,7 +960,7 @@ function renderKanban(leads) {
                 activeTasksList.sort((a, b) => a.dueDate.localeCompare(b.dueDate));
                 const t = activeTasksList[0];
                 
-                const todayStr = new Date().toLocaleDateString('en-CA');
+                const todayStr = getLocalDateString();
                 const isOverdue = t.dueDate < todayStr;
                 const isToday = t.dueDate === todayStr;
                 const color = isOverdue ? '#fca5a5' : (isToday ? '#fcd34d' : '#93c5fd'); // мягкий красный, желтый, голубой
@@ -1493,7 +1493,7 @@ function renderLeadMiddleColumn(lead) {
     return `<option value="${escHtml(name)}" ${currentUser === name ? 'selected' : ''}>${escHtml(name)}</option>`;
   }).join('');
 
-  const todayStr = new Date().toLocaleDateString('en-CA');
+  const todayStr = getLocalDateString();
 
   const timelineHtml = history.length === 0
     ? '<div style="color:var(--text2); font-size:13px; font-style:italic; text-align:center; padding:40px 0;">История пуста. Напишите первый комментарий или поставьте задачу!</div>'
@@ -1889,7 +1889,7 @@ async function openLeadDetail(id, stage) {
 
     ${(f['Дата консультации'] || stage === 'Консультация назначена' || stage === 'КП на рассмотрении' || stage === 'Договор на рассмотрении' || f['Консультация проведена']) ? `
       <div class="card" style="margin-bottom:12px; border-color:#3b82f6; padding:10px 14px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
-        ${f['Дата консультации'] ? `<div style="color:#3b82f6; font-weight:600; font-size:13px;">📅 ${escHtml(f['Дата консультации'])} ${escHtml(f['Время консультации']||'')}</div>` : '<div style="color:#3b82f6; font-weight:600; font-size:13px;">📅 Консультация запланирована</div>'}
+        <div style="color:#3b82f6; font-weight:700; font-size:13px; display:flex; align-items:center; gap:6px;">🔔 Консультация</div>
         <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; font-weight:600">
           <input type="checkbox" id="ei-consult-done" ${f['Консультация проведена']?'checked':''}
             onchange="toggleConsultDone('${id}')"
@@ -3345,7 +3345,7 @@ function openContactLaterModal(leadId, newStage, fromStage, beforeId) {
   // Заполняем дефолтную дату: завтрашний день
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
-  const tomorrowStr = tomorrow.toLocaleDateString('en-CA');
+  const tomorrowStr = getLocalDateString(tomorrow);
   
   const dateEl = document.getElementById('contact-later-date');
   if (dateEl) {
@@ -3394,7 +3394,7 @@ function openQuickTaskModal(leadId) {
   }
 
   // Заполняем дефолтную дату: сегодня
-  const todayStr = new Date().toLocaleDateString('en-CA');
+  const todayStr = getLocalDateString();
   const dateEl = document.getElementById('contact-later-date');
   if (dateEl) {
     dateEl.value = todayStr;

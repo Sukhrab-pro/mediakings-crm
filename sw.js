@@ -1,4 +1,4 @@
-const CACHE = 'mk-crm-v65';
+const CACHE = 'mk-crm-v66';
 const ASSETS = [
   './',
   './index.html',

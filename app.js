@@ -451,7 +451,7 @@ function logout() {
 
 // ─── Task reminders notification badge & modal drawer list
 function updateTasksReminderNotification() {
-  const currentUser = localStorage.getItem('crm_current_user');
+  const currentUser = getCRMCurrentUser();
   const btnDesktop = document.getElementById('btn-tasks-reminder');
   const btnMobile = document.getElementById('btn-mobile-tasks-reminder');
   
@@ -472,58 +472,70 @@ function updateTasksReminderNotification() {
   };
 
   const activeLeads = State.leads.filter(l => !isArchivedLocal(l));
+  const todayStr = getLocalDateString();
+  const cleanCurrentUser = currentUser.trim().toLowerCase();
   
-  // Construct current local datetime: YYYY-MM-DDTHH:MM
-  const now = new Date();
-  const todayStr = now.toLocaleDateString('en-CA');
-  const hh = String(now.getHours()).padStart(2, '0');
-  const mm = String(now.getMinutes()).padStart(2, '0');
-  const currentDateTimeStr = `${todayStr}T${hh}:${mm}`;
+  const readTaskIds = JSON.parse(localStorage.getItem('crm_read_tasks') || '[]');
   
-  let myTasksCount = 0;
+  let totalDueTasksCount = 0;
+  let unreadDueTasksCount = 0;
+
   activeLeads.forEach(l => {
     const tasks = safeJsonParse(l.fields['Задачи'] || '[]');
     const myActiveDueTasks = tasks.filter(t => {
-      if (t.done || t.user !== currentUser || !t.dueDate) return false;
-      const taskDateTimeStr = t.dueDate + (t.dueTime ? 'T' + t.dueTime : 'T00:00');
-      return taskDateTimeStr <= currentDateTimeStr;
+      if (t.done) return false;
+      if (t.user && t.user.trim().toLowerCase() !== cleanCurrentUser) return false;
+      if (!t.dueDate) return false;
+      return t.dueDate <= todayStr;
     });
-    myTasksCount += myActiveDueTasks.length;
+    totalDueTasksCount += myActiveDueTasks.length;
+    myActiveDueTasks.forEach(t => {
+      if (!readTaskIds.includes(t.id)) {
+        unreadDueTasksCount++;
+      }
+    });
   });
 
   const badgeDesktop = document.getElementById('tasks-reminder-badge');
   const badgeMobile = document.getElementById('mobile-tasks-reminder-badge');
 
-  if (btnDesktop) {
-    btnDesktop.style.display = 'inline-flex';
-    btnDesktop.style.alignItems = 'center';
-    if (myTasksCount > 0) {
-      badgeDesktop.textContent = myTasksCount;
-      badgeDesktop.style.display = 'inline-block';
-      btnDesktop.style.background = 'rgba(239,68,68,0.15)';
-      btnDesktop.style.borderColor = 'rgba(239,68,68,0.3)';
-      btnDesktop.style.color = '#fca5a5';
-    } else {
-      badgeDesktop.style.display = 'none';
-      btnDesktop.style.background = 'rgba(99,102,241,0.1)';
-      btnDesktop.style.borderColor = 'rgba(99,102,241,0.25)';
-      btnDesktop.style.color = '#a5b4fc';
+  // Bell is shown if there are ANY active tasks for today/overdue (read or unread)
+  if (totalDueTasksCount > 0) {
+    if (btnDesktop) {
+      btnDesktop.style.display = 'inline-flex';
+      btnDesktop.style.alignItems = 'center';
+      
+      if (unreadDueTasksCount > 0) {
+        badgeDesktop.textContent = unreadDueTasksCount;
+        badgeDesktop.style.display = 'inline-block';
+        btnDesktop.style.background = 'rgba(239,68,68,0.15)';
+        btnDesktop.style.borderColor = 'rgba(239,68,68,0.3)';
+        btnDesktop.style.color = '#fca5a5';
+      } else {
+        badgeDesktop.style.display = 'none';
+        btnDesktop.style.background = 'rgba(99,102,241,0.1)';
+        btnDesktop.style.borderColor = 'rgba(99,102,241,0.25)';
+        btnDesktop.style.color = '#a5b4fc';
+      }
     }
-  }
 
-  if (btnMobile) {
-    btnMobile.style.display = 'inline-flex';
-    if (myTasksCount > 0) {
-      badgeMobile.textContent = myTasksCount;
-      badgeMobile.style.display = 'flex';
-    } else {
-      badgeMobile.style.display = 'none';
+    if (btnMobile) {
+      btnMobile.style.display = 'inline-flex';
+      if (unreadDueTasksCount > 0) {
+        badgeMobile.textContent = unreadDueTasksCount;
+        badgeMobile.style.display = 'flex';
+      } else {
+        badgeMobile.style.display = 'none';
+      }
     }
+  } else {
+    if (btnDesktop) btnDesktop.style.display = 'none';
+    if (btnMobile) btnMobile.style.display = 'none';
   }
 }
 
 function openTasksReminder() {
-  const currentUser = localStorage.getItem('crm_current_user');
+  const currentUser = getCRMCurrentUser();
   if (!currentUser) return;
 
   const isArchivedLocal = (lead) => {
@@ -536,20 +548,17 @@ function openTasksReminder() {
   };
 
   const activeLeads = State.leads.filter(l => !isArchivedLocal(l));
-  
-  const now = new Date();
-  const todayStr = now.toLocaleDateString('en-CA');
-  const hh = String(now.getHours()).padStart(2, '0');
-  const mm = String(now.getMinutes()).padStart(2, '0');
-  const currentDateTimeStr = `${todayStr}T${hh}:${mm}`;
+  const todayStr = getLocalDateString();
+  const cleanCurrentUser = currentUser.trim().toLowerCase();
   
   const myTasks = [];
   activeLeads.forEach(l => {
     const tasks = safeJsonParse(l.fields['Задачи'] || '[]');
     const myActiveDueTasks = tasks.filter(t => {
-      if (t.done || t.user !== currentUser || !t.dueDate) return false;
-      const taskDateTimeStr = t.dueDate + (t.dueTime ? 'T' + t.dueTime : 'T00:00');
-      return taskDateTimeStr <= currentDateTimeStr;
+      if (t.done) return false;
+      if (t.user && t.user.trim().toLowerCase() !== cleanCurrentUser) return false;
+      if (!t.dueDate) return false;
+      return t.dueDate <= todayStr;
     });
     myActiveDueTasks.forEach(t => {
       myTasks.push({
@@ -572,6 +581,8 @@ function openTasksReminder() {
   const container = document.getElementById('tasks-reminder-content');
   if (!container) return;
 
+  const readTaskIds = JSON.parse(localStorage.getItem('crm_read_tasks') || '[]');
+
   if (myTasks.length === 0) {
     container.innerHTML = `
       <div style="text-align:center; padding:40px 20px; color:var(--text2);">
@@ -581,23 +592,39 @@ function openTasksReminder() {
       </div>
     `;
   } else {
-    container.innerHTML = myTasks.map(item => {
+    const hasUnread = myTasks.some(item => !readTaskIds.includes(item.task.id));
+    const markAllBtn = hasUnread 
+      ? `<button onclick="markAllTasksAsRead()" style="background:none; border:none; color:#a5b4fc; font-size:12px; font-weight:700; cursor:pointer; padding:4px 8px; margin-bottom:12px; display:block; text-align:right; width:100%;">✓ Отметить все как прочитанные</button>` 
+      : '';
+
+    container.innerHTML = markAllBtn + myTasks.map(item => {
       const isOverdue = item.task.dueDate < todayStr;
       const isToday = item.task.dueDate === todayStr;
       const dueClass = isOverdue ? 'overdue' : (isToday ? 'today' : 'future');
       const dueLabel = isOverdue ? '⚠️ Просрочено: ' : (isToday ? '🔔 Сегодня: ' : 'Срок: ');
       const timeStr = item.task.dueTime ? ` в ${item.task.dueTime}` : '';
       
+      const isRead = readTaskIds.includes(item.task.id);
+      const cardOpacity = isRead ? 'opacity: 0.55;' : 'opacity: 1;';
+      const indicatorCircle = isRead 
+        ? '' 
+        : `<span class="unread-dot" style="width: 8px; height: 8px; background: #3b82f6; border-radius: 50%; display: inline-block; flex-shrink:0; box-shadow:0 0 8px #3b82f6;"></span>`;
+      
       return `
-        <div class="task-reminder-item" onclick="goToLeadFromTask('${item.leadId}', '${escHtml(item.stage)}')" style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); padding:12px 14px; border-radius:12px; margin-bottom:8px; cursor:pointer; transition:all 0.2s;">
-          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:4px;">
-            <div style="font-weight:700; color:#fff; font-size:14px;">🎯 ${escHtml(item.leadName)}</div>
-            <span class="task-due ${dueClass}" style="font-size:11px; font-weight:700; padding:2px 6px; border-radius:6px;">${dueLabel}${formatDate(item.task.dueDate)}${timeStr}</span>
+        <div class="task-reminder-item" onclick="clickTaskInReminder('${item.task.id}', '${item.leadId}', '${escHtml(item.stage)}')" style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); padding:12px 14px; border-radius:12px; margin-bottom:8px; cursor:pointer; transition:all 0.2s; display:flex; gap:10px; align-items:flex-start; ${cardOpacity}">
+          <div style="flex:1;">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:4px;">
+              <div style="font-weight:700; color:#fff; font-size:14px; display:flex; align-items:center; gap:6px;">🎯 ${escHtml(item.leadName)}</div>
+              <span class="task-due ${dueClass}" style="font-size:11px; font-weight:700; padding:2px 6px; border-radius:6px;">${dueLabel}${formatDate(item.task.dueDate)}${timeStr}</span>
+            </div>
+            <div style="font-size:13px; color:var(--text1); margin-bottom:8px; line-height:1.4;">${escHtml(item.task.text)}</div>
+            <div style="font-size:11px; color:var(--text2); display:flex; justify-content:space-between; align-items:center;">
+              <span>📁 Этап: ${escHtml(item.stage)}</span>
+              ${item.phone ? `<span>📱 ${escHtml(item.phone)}</span>` : ''}
+            </div>
           </div>
-          <div style="font-size:13px; color:var(--text1); margin-bottom:8px; line-height:1.4;">${escHtml(item.task.text)}</div>
-          <div style="font-size:11px; color:var(--text2); display:flex; justify-content:space-between; align-items:center;">
-            <span>📁 Этап: ${escHtml(item.stage)}</span>
-            ${item.phone ? `<span>📱 ${escHtml(item.phone)}</span>` : ''}
+          <div style="display:flex; align-items:center; height:100%; min-height:40px; justify-content:center;">
+            ${indicatorCircle}
           </div>
         </div>
       `;
@@ -612,9 +639,59 @@ function goToLeadFromTask(leadId, stage) {
   openLeadDetail(leadId, stage);
 }
 
+function clickTaskInReminder(taskId, leadId, stage) {
+  let readTaskIds = JSON.parse(localStorage.getItem('crm_read_tasks') || '[]');
+  if (!readTaskIds.includes(taskId)) {
+    readTaskIds.push(taskId);
+    localStorage.setItem('crm_read_tasks', JSON.stringify(readTaskIds));
+  }
+  updateTasksReminderNotification();
+  goToLeadFromTask(leadId, stage);
+}
+
+function markAllTasksAsRead() {
+  const currentUser = getCRMCurrentUser();
+  if (!currentUser) return;
+
+  const isArchivedLocal = (lead) => {
+    const activeFields = window.ActiveFieldsCache?.[CONFIG.TABLES.LEADS] || [];
+    if (activeFields.includes('Архивирован')) {
+      return lead.fields['Архивирован'] === true || lead.fields['Архивирован'] === 'true';
+    }
+    const localArchived = JSON.parse(localStorage.getItem('crm_archived_leads') || '[]');
+    return localArchived.includes(lead.id);
+  };
+
+  const activeLeads = State.leads.filter(l => !isArchivedLocal(l));
+  const todayStr = getLocalDateString();
+  const cleanCurrentUser = currentUser.trim().toLowerCase();
+
+  let readTaskIds = JSON.parse(localStorage.getItem('crm_read_tasks') || '[]');
+  let updated = false;
+
+  activeLeads.forEach(l => {
+    const tasks = safeJsonParse(l.fields['Задачи'] || '[]');
+    tasks.forEach(t => {
+      if (!t.done && (t.user && t.user.trim().toLowerCase() === cleanCurrentUser) && t.dueDate) {
+        if (t.dueDate <= todayStr && !readTaskIds.includes(t.id)) {
+          readTaskIds.push(t.id);
+          updated = true;
+        }
+      }
+    });
+  });
+
+  if (updated) {
+    localStorage.setItem('crm_read_tasks', JSON.stringify(readTaskIds));
+    updateTasksReminderNotification();
+    openTasksReminder(); // Re-render the drawer list immediately
+    toast('Все напоминания отмечены как прочитанные ✓');
+  }
+}
+
 // ─── Background checker for push alerts & badge count
 function checkDueTasksAndNotify() {
-  const currentUser = localStorage.getItem('crm_current_user');
+  const currentUser = getCRMCurrentUser();
   if (!currentUser || !State.leads || State.leads.length === 0) return;
 
   // Sync the badge in top bar
@@ -632,10 +709,11 @@ function checkDueTasksAndNotify() {
 
     const activeLeads = State.leads.filter(l => !isArchivedLocal(l));
     const now = new Date();
-    const todayStr = now.toLocaleDateString('en-CA');
+    const todayStr = getLocalDateString();
     const hh = String(now.getHours()).padStart(2, '0');
     const mm = String(now.getMinutes()).padStart(2, '0');
     const currentDateTimeStr = `${todayStr}T${hh}:${mm}`;
+    const cleanCurrentUser = currentUser.trim().toLowerCase();
 
     let notifiedIds = JSON.parse(localStorage.getItem('crm_notified_tasks') || '[]');
     let updated = false;
@@ -643,7 +721,7 @@ function checkDueTasksAndNotify() {
     activeLeads.forEach(l => {
       const tasks = safeJsonParse(l.fields['Задачи'] || '[]');
       tasks.forEach(t => {
-        if (!t.done && t.user === currentUser && t.dueDate) {
+        if (!t.done && (t.user && t.user.trim().toLowerCase() === cleanCurrentUser) && t.dueDate) {
           const taskDateTimeStr = t.dueDate + (t.dueTime ? 'T' + t.dueTime : 'T00:00');
           if (taskDateTimeStr <= currentDateTimeStr && !notifiedIds.includes(t.id)) {
             // Check that it's within past 12 hours to avoid spamming alerts on initial login
@@ -687,6 +765,8 @@ window.initApp = initApp;
 window.updateTasksReminderNotification = updateTasksReminderNotification;
 window.openTasksReminder = openTasksReminder;
 window.goToLeadFromTask = goToLeadFromTask;
+window.clickTaskInReminder = clickTaskInReminder;
+window.markAllTasksAsRead = markAllTasksAsRead;
 window.startDueTasksChecker = startDueTasksChecker;
 
 initApp();

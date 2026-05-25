@@ -37,3 +37,31 @@ const CONFIG = {
     source: ['Источник'],
   }
 };
+
+// Глобальные хелперы для работы с датами и текущим пользователем во избежание сбоев локали на разных устройствах
+function getLocalDateString(d = new Date()) {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function getLocalDateTimeString(d = new Date()) {
+  const todayStr = getLocalDateString(d);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return `${todayStr}T${hh}:${mm}`;
+}
+
+function getCRMCurrentUser() {
+  const activeUser = localStorage.getItem('crm_current_user');
+  if (activeUser) return activeUser;
+  
+  try {
+    const user = JSON.parse(localStorage.getItem('crm_user') || 'null');
+    return user ? user.name : '';
+  } catch (e) {
+    return '';
+  }
+}
+
