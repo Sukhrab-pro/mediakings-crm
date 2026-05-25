@@ -345,6 +345,17 @@ async function initApp() {
     }
     
     navigate(defaultPage);
+
+    // Request notification permission
+    if (window.Notification && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+
+    // Start background check for tasks
+    if (!window._dueTasksCheckerStarted) {
+      window._dueTasksCheckerStarted = true;
+      startDueTasksChecker();
+    }
   }
 }
 
@@ -450,7 +461,7 @@ function updateTasksReminderNotification() {
     return;
   }
 
-  // Helper to check if lead is archived (replicated here to avoid load order issues)
+  // Helper to check if lead is archived
   const isArchivedLocal = (lead) => {
     const activeFields = window.ActiveFieldsCache?.[CONFIG.TABLES.LEADS] || [];
     if (activeFields.includes('Архивирован')) {
@@ -461,13 +472,23 @@ function updateTasksReminderNotification() {
   };
 
   const activeLeads = State.leads.filter(l => !isArchivedLocal(l));
-  const todayStr = new Date().toISOString().substring(0, 10);
+  
+  // Construct current local datetime: YYYY-MM-DDTHH:MM
+  const now = new Date();
+  const todayStr = now.toLocaleDateString('en-CA');
+  const hh = String(now.getHours()).padStart(2, '0');
+  const mm = String(now.getMinutes()).padStart(2, '0');
+  const currentDateTimeStr = `${todayStr}T${hh}:${mm}`;
   
   let myTasksCount = 0;
   activeLeads.forEach(l => {
     const tasks = safeJsonParse(l.fields['Задачи'] || '[]');
-    const myActiveTodayTasks = tasks.filter(t => !t.done && t.user === currentUser && t.dueDate && t.dueDate <= todayStr);
-    myTasksCount += myActiveTodayTasks.length;
+    const myActiveDueTasks = tasks.filter(t => {
+      if (t.done || t.user !== currentUser || !t.dueDate) return false;
+      const taskDateTimeStr = t.dueDate + (t.dueTime ? 'T' + t.dueTime : 'T00:00');
+      return taskDateTimeStr <= currentDateTimeStr;
+    });
+    myTasksCount += myActiveDueTasks.length;
   });
 
   const badgeDesktop = document.getElementById('tasks-reminder-badge');
@@ -505,7 +526,6 @@ function openTasksReminder() {
   const currentUser = localStorage.getItem('crm_current_user');
   if (!currentUser) return;
 
-  // Helper to check if lead is archived
   const isArchivedLocal = (lead) => {
     const activeFields = window.ActiveFieldsCache?.[CONFIG.TABLES.LEADS] || [];
     if (activeFields.includes('Архивирован')) {
@@ -516,13 +536,22 @@ function openTasksReminder() {
   };
 
   const activeLeads = State.leads.filter(l => !isArchivedLocal(l));
-  const todayStr = new Date().toISOString().substring(0, 10);
+  
+  const now = new Date();
+  const todayStr = now.toLocaleDateString('en-CA');
+  const hh = String(now.getHours()).padStart(2, '0');
+  const mm = String(now.getMinutes()).padStart(2, '0');
+  const currentDateTimeStr = `${todayStr}T${hh}:${mm}`;
   
   const myTasks = [];
   activeLeads.forEach(l => {
     const tasks = safeJsonParse(l.fields['Задачи'] || '[]');
-    const myActiveTodayTasks = tasks.filter(t => !t.done && t.user === currentUser && t.dueDate && t.dueDate <= todayStr);
-    myActiveTodayTasks.forEach(t => {
+    const myActiveDueTasks = tasks.filter(t => {
+      if (t.done || t.user !== currentUser || !t.dueDate) return false;
+      const taskDateTimeStr = t.dueDate + (t.dueTime ? 'T' + t.dueTime : 'T00:00');
+      return taskDateTimeStr <= currentDateTimeStr;
+    });
+    myActiveDueTasks.forEach(t => {
       myTasks.push({
         task: t,
         leadId: l.id,
@@ -533,8 +562,12 @@ function openTasksReminder() {
     });
   });
 
-  // Sort: overdue first, then today
-  myTasks.sort((a, b) => a.task.dueDate.localeCompare(b.task.dueDate));
+  // Сортируем: сначала просроченные по дате/времени
+  myTasks.sort((a, b) => {
+    const aDt = a.task.dueDate + (a.task.dueTime ? 'T' + a.task.dueTime : 'T00:00');
+    const bDt = b.task.dueDate + (b.task.dueTime ? 'T' + b.task.dueTime : 'T00:00');
+    return aDt.localeCompare(bDt);
+  });
 
   const container = document.getElementById('tasks-reminder-content');
   if (!container) return;
@@ -544,7 +577,7 @@ function openTasksReminder() {
       <div style="text-align:center; padding:40px 20px; color:var(--text2);">
         <div style="font-size:42px; margin-bottom:12px;">🎉</div>
         <div style="font-weight:700; color:#fff; font-size:15px; margin-bottom:4px;">Все задачи выполнены!</div>
-        <div style="font-size:12px;">У вас нет невыполненных задач на сегодня или просроченных задач.</div>
+        <div style="font-size:12px;">У вас нет невыполненных задач на данный момент.</div>
       </div>
     `;
   } else {
@@ -553,12 +586,13 @@ function openTasksReminder() {
       const isToday = item.task.dueDate === todayStr;
       const dueClass = isOverdue ? 'overdue' : (isToday ? 'today' : 'future');
       const dueLabel = isOverdue ? '⚠️ Просрочено: ' : (isToday ? '🔔 Сегодня: ' : 'Срок: ');
+      const timeStr = item.task.dueTime ? ` в ${item.task.dueTime}` : '';
       
       return `
         <div class="task-reminder-item" onclick="goToLeadFromTask('${item.leadId}', '${escHtml(item.stage)}')" style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); padding:12px 14px; border-radius:12px; margin-bottom:8px; cursor:pointer; transition:all 0.2s;">
           <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:4px;">
             <div style="font-weight:700; color:#fff; font-size:14px;">🎯 ${escHtml(item.leadName)}</div>
-            <span class="task-due ${dueClass}" style="font-size:11px; font-weight:700; padding:2px 6px; border-radius:6px;">${dueLabel}${formatDate(item.task.dueDate)}</span>
+            <span class="task-due ${dueClass}" style="font-size:11px; font-weight:700; padding:2px 6px; border-radius:6px;">${dueLabel}${formatDate(item.task.dueDate)}${timeStr}</span>
           </div>
           <div style="font-size:13px; color:var(--text1); margin-bottom:8px; line-height:1.4;">${escHtml(item.task.text)}</div>
           <div style="font-size:11px; color:var(--text2); display:flex; justify-content:space-between; align-items:center;">
@@ -578,12 +612,82 @@ function goToLeadFromTask(leadId, stage) {
   openLeadDetail(leadId, stage);
 }
 
+// ─── Background checker for push alerts & badge count
+function checkDueTasksAndNotify() {
+  const currentUser = localStorage.getItem('crm_current_user');
+  if (!currentUser || !State.leads || State.leads.length === 0) return;
+
+  // Sync the badge in top bar
+  updateTasksReminderNotification();
+
+  if (window.Notification && Notification.permission === 'granted') {
+    const isArchivedLocal = (lead) => {
+      const activeFields = window.ActiveFieldsCache?.[CONFIG.TABLES.LEADS] || [];
+      if (activeFields.includes('Архивирован')) {
+        return lead.fields['Архивирован'] === true || lead.fields['Архивирован'] === 'true';
+      }
+      const localArchived = JSON.parse(localStorage.getItem('crm_archived_leads') || '[]');
+      return localArchived.includes(lead.id);
+    };
+
+    const activeLeads = State.leads.filter(l => !isArchivedLocal(l));
+    const now = new Date();
+    const todayStr = now.toLocaleDateString('en-CA');
+    const hh = String(now.getHours()).padStart(2, '0');
+    const mm = String(now.getMinutes()).padStart(2, '0');
+    const currentDateTimeStr = `${todayStr}T${hh}:${mm}`;
+
+    let notifiedIds = JSON.parse(localStorage.getItem('crm_notified_tasks') || '[]');
+    let updated = false;
+
+    activeLeads.forEach(l => {
+      const tasks = safeJsonParse(l.fields['Задачи'] || '[]');
+      tasks.forEach(t => {
+        if (!t.done && t.user === currentUser && t.dueDate) {
+          const taskDateTimeStr = t.dueDate + (t.dueTime ? 'T' + t.dueTime : 'T00:00');
+          if (taskDateTimeStr <= currentDateTimeStr && !notifiedIds.includes(t.id)) {
+            // Check that it's within past 12 hours to avoid spamming alerts on initial login
+            const taskTime = new Date(taskDateTimeStr);
+            const timeDiffHrs = (now - taskTime) / (1000 * 60 * 60);
+
+            if (timeDiffHrs < 12) {
+              const leadName = getField(l.fields, CONFIG.LEAD_FIELDS.name) || 'Лид';
+              try {
+                new Notification(`🎯 Пора связаться: ${leadName}`, {
+                  body: `${t.text}${t.dueTime ? ' в ' + t.dueTime : ''}`,
+                  icon: './favicon.ico'
+                });
+              } catch (e) {
+                console.warn('Could not fire browser notification:', e);
+              }
+            }
+
+            notifiedIds.push(t.id);
+            updated = true;
+          }
+        }
+      });
+    });
+
+    if (updated) {
+      if (notifiedIds.length > 100) notifiedIds = notifiedIds.slice(-100);
+      localStorage.setItem('crm_notified_tasks', JSON.stringify(notifiedIds));
+    }
+  }
+}
+
+function startDueTasksChecker() {
+  checkDueTasksAndNotify();
+  setInterval(checkDueTasksAndNotify, 30000); // Check every 30 seconds
+}
+
 window.submitLogin = submitLogin;
 window.logout = logout;
 window.initApp = initApp;
 window.updateTasksReminderNotification = updateTasksReminderNotification;
 window.openTasksReminder = openTasksReminder;
 window.goToLeadFromTask = goToLeadFromTask;
+window.startDueTasksChecker = startDueTasksChecker;
 
 initApp();
 

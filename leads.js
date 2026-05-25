@@ -960,17 +960,23 @@ function renderKanban(leads) {
                 activeTasksList.sort((a, b) => a.dueDate.localeCompare(b.dueDate));
                 const t = activeTasksList[0];
                 
-                const todayStr = new Date().toISOString().substring(0, 10);
+                const todayStr = new Date().toLocaleDateString('en-CA');
                 const isOverdue = t.dueDate < todayStr;
                 const isToday = t.dueDate === todayStr;
                 const color = isOverdue ? '#fca5a5' : (isToday ? '#fcd34d' : '#93c5fd'); // мягкий красный, желтый, голубой
                 const icon = isOverdue ? '⚠️' : '🔔';
+                const timeStr = t.dueTime ? ` в ${t.dueTime}` : '';
                 
-                return `<div class="kanban-card-sub" style="color:${color}; font-weight:600; font-size:11px;" title="${escHtml(t.text)}">${icon} ${formatDate(t.dueDate)}: ${escHtml(t.text)}</div>`;
+                return `<div class="kanban-card-sub" style="color:${color}; font-weight:600; font-size:11px;" title="${escHtml(t.text)}">${icon} ${formatDate(t.dueDate)}${timeStr}: ${escHtml(t.text)}</div>`;
               })()}
               ${budget  ? `<div class="kanban-card-sub" style="color:#34d399">💰 ${Number(budget).toLocaleString('ru-RU')} ₸</div>` : ''}
               ${nonTargetReason ? `<div class="kanban-card-sub" style="color:#94a3b8;font-size:11px">🚫 ${escHtml(nonTargetReason)}</div>` : ''}
               ${src    ? `<div class="kanban-card-sub" style="opacity:.6">${escHtml(src)}</div>` : ''}
+              <div class="kanban-card-actions" style="margin-top:6px; display:flex; justify-content:flex-end;">
+                <button class="card-action-btn" onclick="event.stopPropagation(); openQuickTaskModal('${lead.id}')" title="Быстрая задача" style="background:none; border:none; padding:2px 6px; color:var(--text2); font-size:10px; display:flex; align-items:center; gap:4px; border-radius:4px; transition:all 0.2s; cursor:pointer;">
+                  ➕📅 Задача
+                </button>
+              </div>
             </div>`;
           }).join('')}
       </div>
@@ -1513,7 +1519,7 @@ function renderLeadMiddleColumn(lead) {
     return parseDateTime(b.completedAt) - parseDateTime(a.completedAt);
   });
 
-  const todayStr = new Date().toISOString().substring(0, 10);
+  const todayStr = new Date().toLocaleDateString('en-CA');
 
   const activeTasksHtml = activeTasks.length === 0 
     ? '<div style="color:var(--text2); font-size:13px; font-style:italic; padding:6px 0;">Нет активных задач</div>'
@@ -1522,6 +1528,7 @@ function renderLeadMiddleColumn(lead) {
         const isToday = t.dueDate === todayStr;
         const dueClass = isOverdue ? 'overdue' : (isToday ? 'today' : 'future');
         const dueLabel = isOverdue ? 'Просрочено: ' : (isToday ? 'Сегодня: ' : 'Срок: ');
+        const timeStr = t.dueTime ? ` в ${t.dueTime}` : '';
         return `
           <div class="task-item">
             <input type="checkbox" class="task-checkbox" onclick="toggleTaskDone('${id}', '${t.id}')">
@@ -1529,7 +1536,7 @@ function renderLeadMiddleColumn(lead) {
               <div class="task-text">${escHtml(t.text)}</div>
               <div class="task-meta">
                 <span>👤 ${escHtml(t.user || '—')}</span>
-                <span class="task-due ${dueClass}">${dueLabel}${formatDate(t.dueDate)}</span>
+                <span class="task-due ${dueClass}">${dueLabel}${formatDate(t.dueDate)}${timeStr}</span>
               </div>
             </div>
           </div>
@@ -1603,9 +1610,10 @@ function renderLeadMiddleColumn(lead) {
       <div class="inline-form" style="margin-top:12px; padding:10px; background:rgba(255,255,255,0.02); border-radius:8px; border:1px solid rgba(255,255,255,0.04)">
         <div style="font-size:12px; font-weight:700; color:var(--text2); margin-bottom:6px;">Новая задача:</div>
         <input type="text" id="ei-new-task-text" class="form-input compact-input" placeholder="Что нужно сделать..." style="width:100%; margin-bottom:6px; min-height: unset !important;">
-        <div class="inline-form-row">
+        <div class="inline-form-row" style="display:flex; gap:6px;">
           <input type="date" id="ei-new-task-date" class="form-input compact-input" onclick="try{this.showPicker()}catch(e){}" style="flex:1;">
-          <button class="btn btn-save-compact" onclick="addLeadTask('${id}')" style="padding:6px 12px !important; font-size:12px !important; height:34px !important;">Добавить</button>
+          <input type="time" id="ei-new-task-time" class="form-input compact-input" onclick="try{this.showPicker()}catch(e){}" style="width:85px;">
+          <button class="btn btn-save-compact" onclick="addLeadTask('${id}')" style="padding:6px 12px !important; font-size:12px !important; height:34px !important; margin:0;">Добавить</button>
         </div>
       </div>
 
@@ -1686,8 +1694,10 @@ async function addLeadComment(id) {
 async function addLeadTask(id) {
   const textEl = document.getElementById('ei-new-task-text');
   const dateEl = document.getElementById('ei-new-task-date');
+  const timeEl = document.getElementById('ei-new-task-time');
   const text = textEl?.value.trim();
   const dueDate = dateEl?.value;
+  const dueTime = timeEl?.value || '';
 
   if (!text) { toast('Введите текст задачи', 'error'); return; }
   if (!dueDate) { toast('Выберите срок выполнения', 'error'); return; }
@@ -1703,6 +1713,7 @@ async function addLeadTask(id) {
     id: 't_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
     text: text,
     dueDate: dueDate,
+    dueTime: dueTime,
     done: false,
     createdAt: dateStr,
     completedAt: '',
@@ -1715,7 +1726,7 @@ async function addLeadTask(id) {
     date: dateStr,
     user: currentUser,
     type: 'task_create',
-    details: `Создана задача: "${text}" (срок: ${formatDate(dueDate)})`
+    details: `Создана задача: "${text}" (срок: ${formatDate(dueDate)}${dueTime ? ' в ' + dueTime : ''})`
   });
 
   const updates = {
@@ -1725,6 +1736,7 @@ async function addLeadTask(id) {
 
   textEl.value = '';
   dateEl.value = '';
+  if (timeEl) timeEl.value = '';
 
   try {
     await Airtable.update(CONFIG.TABLES.LEADS, id, updates);
@@ -3309,8 +3321,10 @@ let _contactLaterLeadId = null;
 let _contactLaterNewStage = null;
 let _contactLaterFromStage = null;
 let _contactLaterBeforeId = null;
+let _quickTaskOnly = false;
 
 function openContactLaterModal(leadId, newStage, fromStage, beforeId) {
+  _quickTaskOnly = false;
   _contactLaterLeadId = leadId;
   _contactLaterNewStage = newStage;
   _contactLaterFromStage = fromStage;
@@ -3321,6 +3335,12 @@ function openContactLaterModal(leadId, newStage, fromStage, beforeId) {
 
   const leadName = getField(lead.fields, CONFIG.LEAD_FIELDS.name) || 'Лид';
   const leadPhone = getField(lead.fields, CONFIG.LEAD_FIELDS.phone) || '';
+
+  const titleEl = document.querySelector('#drawer-contact-later .drawer-title');
+  if (titleEl) titleEl.textContent = '📅 Планирование контакта';
+
+  const saveBtn = document.getElementById('confirm-contact-later-btn');
+  if (saveBtn) saveBtn.textContent = '📅 Запланировать и перенести';
 
   const infoEl = document.getElementById('contact-later-lead-info');
   if (infoEl) {
@@ -3333,16 +3353,74 @@ function openContactLaterModal(leadId, newStage, fromStage, beforeId) {
   // Заполняем дефолтную дату: завтрашний день
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
-  const tomorrowStr = tomorrow.toISOString().substring(0, 10);
+  const tomorrowStr = tomorrow.toLocaleDateString('en-CA');
   
   const dateEl = document.getElementById('contact-later-date');
   if (dateEl) {
     dateEl.value = tomorrowStr;
   }
 
+  const timeEl = document.getElementById('contact-later-time');
+  if (timeEl) {
+    timeEl.value = '';
+  }
+
   const textEl = document.getElementById('contact-later-text');
   if (textEl) {
     textEl.value = 'Связаться позднее';
+    textEl.placeholder = 'Например: Позвонить и узнать решение по КП';
+  }
+
+  openDrawer('drawer-contact-later');
+}
+
+function openQuickTaskModal(leadId) {
+  _quickTaskOnly = true;
+  _contactLaterLeadId = leadId;
+  _contactLaterNewStage = null;
+  _contactLaterFromStage = null;
+  _contactLaterBeforeId = null;
+
+  const lead = State.leads.find(l => l.id === leadId);
+  if (!lead) return;
+
+  const leadName = getField(lead.fields, CONFIG.LEAD_FIELDS.name) || 'Лид';
+  const leadPhone = getField(lead.fields, CONFIG.LEAD_FIELDS.phone) || '';
+
+  const titleEl = document.querySelector('#drawer-contact-later .drawer-title');
+  if (titleEl) titleEl.textContent = '📅 Быстрая задача';
+
+  const saveBtn = document.getElementById('confirm-contact-later-btn');
+  if (saveBtn) saveBtn.textContent = '📅 Создать задачу';
+
+  const infoEl = document.getElementById('contact-later-lead-info');
+  if (infoEl) {
+    infoEl.innerHTML = `
+      <div style="font-weight:700; font-size:14px; color:#fff;">🎯 ${escHtml(leadName)}</div>
+      ${leadPhone ? `<div style="font-size:12px; color:var(--text2); margin-top:4px;">📱 ${escHtml(leadPhone)}</div>` : ''}
+    `;
+  }
+
+  // Заполняем дефолтную дату: сегодня
+  const todayStr = new Date().toLocaleDateString('en-CA');
+  const dateEl = document.getElementById('contact-later-date');
+  if (dateEl) {
+    dateEl.value = todayStr;
+  }
+
+  const timeEl = document.getElementById('contact-later-time');
+  if (timeEl) {
+    const now = new Date();
+    now.setHours(now.getHours() + 1);
+    const HH = String(now.getHours()).padStart(2, '0');
+    const MM = String(now.getMinutes()).padStart(2, '0');
+    timeEl.value = `${HH}:${MM}`;
+  }
+
+  const textEl = document.getElementById('contact-later-text');
+  if (textEl) {
+    textEl.value = '';
+    textEl.placeholder = 'Например: Позвонить и узнать решение по КП';
   }
 
   openDrawer('drawer-contact-later');
@@ -3350,12 +3428,15 @@ function openContactLaterModal(leadId, newStage, fromStage, beforeId) {
 
 function cancelContactLater() {
   closeDrawer('drawer-contact-later');
-  // Сбрасываем Kanban, чтобы вернуть карточку на прежнее место, если перенос был через drag-and-drop
-  renderKanban(State.leads);
+  if (!_quickTaskOnly) {
+    // Сбрасываем Kanban, чтобы вернуть карточку на прежнее место, если перенос был через drag-and-drop
+    renderKanban(State.leads);
+  }
   _contactLaterLeadId = null;
   _contactLaterNewStage = null;
   _contactLaterFromStage = null;
   _contactLaterBeforeId = null;
+  _quickTaskOnly = false;
 }
 
 async function confirmContactLater() {
@@ -3363,12 +3444,14 @@ async function confirmContactLater() {
   if (!leadId) return;
 
   const dateEl = document.getElementById('contact-later-date');
+  const timeEl = document.getElementById('contact-later-time');
   const textEl = document.getElementById('contact-later-text');
   const dueDate = dateEl?.value;
+  const dueTime = timeEl?.value || '';
   const text = textEl?.value.trim();
 
-  if (!dueDate) { toast('Выберите дату для следующего контакта', 'error'); return; }
-  if (!text) { toast('Укажите цель контакта или комментарий', 'error'); return; }
+  if (!dueDate) { toast('Выберите дату', 'error'); return; }
+  if (!text) { toast('Укажите суть задачи', 'error'); return; }
 
   const lead = State.leads.find(l => l.id === leadId);
   if (!lead) return;
@@ -3389,6 +3472,7 @@ async function confirmContactLater() {
       id: 't_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
       text: text,
       dueDate: dueDate,
+      dueTime: dueTime,
       done: false,
       createdAt: dateStr,
       completedAt: '',
@@ -3396,43 +3480,60 @@ async function confirmContactLater() {
     };
     tasks.push(newTask);
 
-    // 2. Логируем смену этапа и создание задачи в историю
+    const updates = {
+      'Задачи': JSON.stringify(tasks)
+    };
+
     const history = safeJsonParse(lead.fields['История'] || '[]');
-    if (_contactLaterFromStage && _contactLaterFromStage !== _contactLaterNewStage) {
+
+    if (!_quickTaskOnly) {
+      // 2. Логируем смену этапа и создание задачи в историю
+      if (_contactLaterFromStage && _contactLaterFromStage !== _contactLaterNewStage) {
+        history.unshift({
+          date: dateStr,
+          user: currentUser,
+          type: 'stage_change',
+          details: `Этап: «${_contactLaterFromStage || '—'}» → «${_contactLaterNewStage}»`
+        });
+      }
       history.unshift({
         date: dateStr,
         user: currentUser,
-        type: 'stage_change',
-        details: `Этап: «${_contactLaterFromStage || '—'}» → «${_contactLaterNewStage}»`
+        type: 'task_create',
+        details: `Создана задача при переносе на «Связаться позднее»: "${text}" (срок: ${formatDate(dueDate)}${dueTime ? ' в ' + dueTime : ''})`
       });
-    }
-    history.unshift({
-      date: dateStr,
-      user: currentUser,
-      type: 'task_create',
-      details: `Создана задача при переносе на «Связаться позднее»: "${text}" (срок: ${formatDate(dueDate)})`
-    });
 
-    const stageField = getStageFieldName(lead.fields);
-    const stageObj = FUNNEL_STAGES.find(s => s.key === _contactLaterNewStage);
-    const stageId = stageObj ? stageObj.id : null;
+      const stageField = getStageFieldName(lead.fields);
+      const stageObj = FUNNEL_STAGES.find(s => s.key === _contactLaterNewStage);
+      const stageId = stageObj ? stageObj.id : null;
 
-    const updates = {
-      [stageField]: stageId || [],
-      'Задачи': JSON.stringify(tasks),
-      'История': JSON.stringify(history)
-    };
+      updates[stageField] = stageId || [];
+      updates['История'] = JSON.stringify(history);
 
-    // Оптимистично обновляем локальный стейт
-    Object.assign(lead.fields, {
-      [stageField]: _contactLaterNewStage,
-      [stageField + ' ID']: stageId ? String(stageId) : '',
-      'Задачи': JSON.stringify(tasks),
-      'История': JSON.stringify(history)
-    });
+      // Оптимистично обновляем локальный стейт
+      Object.assign(lead.fields, {
+        [stageField]: _contactLaterNewStage,
+        [stageField + ' ID']: stageId ? String(stageId) : '',
+        'Задачи': JSON.stringify(tasks),
+        'История': JSON.stringify(history)
+      });
 
-    if (_contactLaterBeforeId !== undefined) {
-      reorderLocalLeads(leadId, _contactLaterBeforeId);
+      if (_contactLaterBeforeId !== undefined) {
+        reorderLocalLeads(leadId, _contactLaterBeforeId);
+      }
+    } else {
+      // Только задача (без смены этапа)
+      history.unshift({
+        date: dateStr,
+        user: currentUser,
+        type: 'task_create',
+        details: `Создана быстрая задача с карточки: "${text}" (срок: ${formatDate(dueDate)}${dueTime ? ' в ' + dueTime : ''})`
+      });
+      updates['История'] = JSON.stringify(history);
+      Object.assign(lead.fields, {
+        'Задачи': JSON.stringify(tasks),
+        'История': JSON.stringify(history)
+      });
     }
 
     closeDrawer('drawer-contact-later');
@@ -3440,24 +3541,24 @@ async function confirmContactLater() {
     
     // Сохраняем в Airtable
     await Airtable.update(CONFIG.TABLES.LEADS, leadId, updates);
-    if (_contactLaterBeforeId !== undefined) {
+    if (!_quickTaskOnly && _contactLaterBeforeId !== undefined) {
       await moveBaserowRow(CONFIG.TABLES.LEADS, leadId, _contactLaterBeforeId);
     }
 
-    toast('Этап обновлен и задача запланирована ✓');
+    toast(_quickTaskOnly ? 'Задача создана ✓' : 'Этап обновлен и задача запланирована ✓');
   } catch (e) {
-    // В случае ошибки сбрасываем состояние
     toast('Ошибка сохранения: ' + e.message, 'error');
-    await loadLeads(); // Перезагружаем с сервера для надежности
+    await loadLeads();
   } finally {
     if (btn) {
-      btn.innerHTML = '📅 Запланировать и перенести';
+      btn.innerHTML = _quickTaskOnly ? '📅 Создать задачу' : '📅 Запланировать и перенести';
       btn.disabled = false;
     }
     _contactLaterLeadId = null;
     _contactLaterNewStage = null;
     _contactLaterFromStage = null;
     _contactLaterBeforeId = null;
+    _quickTaskOnly = false;
   }
 }
 
@@ -3997,5 +4098,6 @@ window.goMobileDay = goMobileDay;
 window.openContactLaterModal = openContactLaterModal;
 window.cancelContactLater = cancelContactLater;
 window.confirmContactLater = confirmContactLater;
+window.openQuickTaskModal = openQuickTaskModal;
 
 

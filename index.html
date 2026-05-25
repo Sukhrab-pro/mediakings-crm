@@ -471,7 +471,10 @@
     <div id="contact-later-lead-info" class="card" style="margin-bottom:16px; border-color:rgba(99,102,241,0.4)"></div>
     <div class="form-group">
       <label class="form-label">Когда связаться? *</label>
-      <input id="contact-later-date" class="form-input" type="date" onclick="try{this.showPicker()}catch(e){}"/>
+      <div style="display:flex; gap:8px;">
+        <input id="contact-later-date" class="form-input" type="date" style="flex:1;" onclick="try{this.showPicker()}catch(e){}"/>
+        <input id="contact-later-time" class="form-input" type="time" style="width:110px;" onclick="try{this.showPicker()}catch(e){}"/>
+      </div>
     </div>
     <div class="form-group" style="margin-top:12px">
       <label class="form-label">Что нужно сделать? / Комментарий *</label>
