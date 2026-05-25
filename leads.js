@@ -997,6 +997,32 @@ function placeDragPlaceholder(colBody, clientY) {
   colBody.appendChild(ph);
 }
 
+// ─── Shared Drag & Drop Reordering Helpers
+function reorderLocalLeads(leadId, beforeId) {
+  const leadIdx = State.leads.findIndex(l => String(l.id) === String(leadId));
+  if (leadIdx === -1) return;
+  const [lead] = State.leads.splice(leadIdx, 1);
+  
+  if (beforeId) {
+    const beforeIdx = State.leads.findIndex(l => String(l.id) === String(beforeId));
+    if (beforeIdx !== -1) {
+      State.leads.splice(beforeIdx, 0, lead);
+      return;
+    }
+  }
+  State.leads.push(lead);
+}
+
+async function moveBaserowRow(tableId, rowId, beforeId) {
+  try {
+    await Baserow.req('PATCH', `/database/rows/table/${tableId}/${rowId}/move/`, {
+      before_id: beforeId ? parseInt(beforeId, 10) : null
+    });
+  } catch (err) {
+    console.error('Failed to move row in Baserow:', err);
+  }
+}
+
 // ─── Drag & Drop (Desktop) — с плейсхолдером между карточками
 function initDragDrop() {
   // ── Карточки
@@ -1044,6 +1070,13 @@ function initDragDrop() {
     col.addEventListener('drop', e => {
       e.preventDefault();
       document.querySelectorAll('.kanban-col').forEach(c => c.classList.remove('drag-over'));
+      
+      const ph = getDragPlaceholder();
+      const beforeCard = ph.nextElementSibling;
+      const beforeId = beforeCard && beforeCard.classList.contains('kanban-card')
+        ? parseInt(beforeCard.dataset.leadId, 10)
+        : null;
+        
       removeDragPlaceholder();
       const newStage     = col.dataset.stage;
       const toBlocked    = col.dataset.blocked === '1';
@@ -1054,10 +1087,24 @@ function initDragDrop() {
         toast('Используйте кнопки действий в карточке лида', 'error');
         return;
       }
-      if (DragState.leadId && newStage && newStage !== DragState.fromStage) {
+      
+      if (DragState.leadId && newStage) {
         _justDropped = true;
         setTimeout(() => { _justDropped = false; }, 300);
-        handleStageDrop(DragState.leadId, newStage, DragState.fromStage);
+        
+        if (newStage !== DragState.fromStage) {
+          handleStageDrop(DragState.leadId, newStage, DragState.fromStage, beforeId);
+        } else {
+          const sortType = State.columnSorting[newStage] || 'default';
+          if (sortType !== 'default') {
+            toast('Сбросьте сортировку колонки для ручного перемещения', 'warning');
+            DragState.leadId = null;
+            return;
+          }
+          reorderLocalLeads(DragState.leadId, beforeId);
+          renderKanban(State.leads);
+          moveBaserowRow(CONFIG.TABLES.LEADS, DragState.leadId, beforeId);
+        }
       }
       DragState.leadId = null;
     });
@@ -1175,6 +1222,13 @@ function initTouchDrag() {
       clearTimeout(timer);
       stopAutoScroll();
       document.querySelectorAll('.kanban-col').forEach(c => c.classList.remove('drag-over'));
+      
+      const ph = getDragPlaceholder();
+      const beforeCard = ph.nextElementSibling;
+      const beforeId = beforeCard && beforeCard.classList.contains('kanban-card')
+        ? parseInt(beforeCard.dataset.leadId, 10)
+        : null;
+        
       removeDragPlaceholder();
       
       if (!ghost) return;
@@ -1199,10 +1253,24 @@ function initTouchDrag() {
         toast('Используйте кнопки действий в карточке лида', 'error');
         return;
       }
-      if (DragState.leadId && newStage && newStage !== DragState.fromStage) {
+      
+      if (DragState.leadId && newStage) {
         _justDropped = true;
         setTimeout(() => { _justDropped = false; }, 300);
-        handleStageDrop(DragState.leadId, newStage, DragState.fromStage);
+        
+        if (newStage !== DragState.fromStage) {
+          handleStageDrop(DragState.leadId, newStage, DragState.fromStage, beforeId);
+        } else {
+          const sortType = State.columnSorting[newStage] || 'default';
+          if (sortType !== 'default') {
+            toast('Сбросьте сортировку колонки для ручного перемещения', 'warning');
+            DragState.leadId = null;
+            return;
+          }
+          reorderLocalLeads(DragState.leadId, beforeId);
+          renderKanban(State.leads);
+          moveBaserowRow(CONFIG.TABLES.LEADS, DragState.leadId, beforeId);
+        }
       }
       DragState.leadId = null;
     };
@@ -1212,16 +1280,16 @@ function initTouchDrag() {
 }
 
 // ─── Stage drop (без всплывашки — перенос мгновенный)
-async function handleStageDrop(leadId, newStage, fromStage) {
+async function handleStageDrop(leadId, newStage, fromStage, beforeId) {
   if (newStage === 'Не целевой') {
     openNonTargetModal([leadId]);
     return;
   }
-  await updateLeadStageOptimistic(leadId, newStage, fromStage);
+  await updateLeadStageOptimistic(leadId, newStage, fromStage, beforeId);
 }
 
 // ─── Оптимистичное обновление этапа
-async function updateLeadStageOptimistic(id, newStage, oldStage) {
+async function updateLeadStageOptimistic(id, newStage, oldStage, beforeId) {
   const lead = State.leads.find(l => l.id === id);
   const stageField = lead ? getStageFieldName(lead.fields) : 'Воронка';
   const stageObj = FUNNEL_STAGES.find(s => s.key === newStage);
@@ -1280,11 +1348,18 @@ async function updateLeadStageOptimistic(id, newStage, oldStage) {
       apiUpdates['Дата возврата'] = todayStr;
       localUpdates['Дата возврата'] = todayStr;
     }
+
+    if (beforeId !== undefined) {
+      reorderLocalLeads(id, beforeId);
+    }
   }
   
   renderKanban(State.leads);
   try {
     await Airtable.update(CONFIG.TABLES.LEADS, id, apiUpdates);
+    if (beforeId !== undefined) {
+      await moveBaserowRow(CONFIG.TABLES.LEADS, id, beforeId);
+    }
     toast('Этап обновлён ✓');
   } catch(e) {
     if (lead) { 
