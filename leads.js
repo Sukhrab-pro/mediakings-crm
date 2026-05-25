@@ -1115,6 +1115,11 @@ function initTouchDrag() {
   document.querySelectorAll('.kanban-card').forEach(card => {
     let timer = null, ghost = null;
     card.addEventListener('touchstart', e => {
+      const firstTouch = e.touches[0];
+      if (firstTouch) {
+        lastTouchX = firstTouch.clientX;
+        lastTouchY = firstTouch.clientY;
+      }
       timer = setTimeout(() => {
         DragState.leadId    = card.dataset.leadId;
         DragState.fromStage = card.dataset.stage;
@@ -1177,7 +1182,14 @@ function initTouchDrag() {
       ghost.remove(); ghost = null; card.style.opacity = '';
       card.classList.remove('dragging');
       
-      const el  = document.elementFromPoint(touch.clientX, touch.clientY);
+      const clientX = lastTouchX || (touch ? touch.clientX : 0);
+      const clientY = lastTouchY || (touch ? touch.clientY : 0);
+      
+      // Reset coordinates for next drag
+      lastTouchX = 0;
+      lastTouchY = 0;
+      
+      const el  = document.elementFromPoint(clientX, clientY);
       const targetCol = el?.closest('.kanban-col');
       const newStage  = targetCol?.dataset.stage;
       const toBlocked = targetCol?.dataset.blocked === '1';
