@@ -271,7 +271,9 @@ const AnState = {
   startDate: null,
   endDate: null,
   manager: '',
-  dailyMonth: getLocalDateString().substring(0, 7)
+  pfStartDate: '',
+  pfEndDate: '',
+  pfPlan: 0
 };
 
 

@@ -155,7 +155,7 @@ function renderAnalytics() {
   const tabs = [
     {key:'funnel',   label:'📊 Воронка'},
     {key:'managers', label:'👤 Менеджеры'},
-    {key:'daily',    label:'📅 Ежедневный отчет'},
+    {key:'daily',    label:'📈 РНП продажи'},
     {key:'refunds',  label:'↩️ Возвраты'},
     {key:'economics', label:'💰 Юнит-экономика'},
   ];
@@ -165,21 +165,42 @@ function renderAnalytics() {
 
   let filtersHtml = '';
   if (AnState.tab === 'daily') {
+    if (!AnState.pfStartDate || !AnState.pfEndDate) {
+      const now = new Date();
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      AnState.pfStartDate = getLocalDateString(startOfMonth);
+      AnState.pfEndDate = getLocalDateString(endOfMonth);
+    }
+    
+    const planKey = `crm_an_pf_plan_${AnState.pfStartDate}_${AnState.pfEndDate}_${AnState.manager || 'all'}`;
+    const storedPlan = localStorage.getItem(planKey);
+    const currentPlan = storedPlan !== null ? parseFloat(storedPlan) : 0;
+    AnState.pfPlan = currentPlan;
+
     const managerOptions = (State.employees || []).map(e => {
       const name = e.fields['Имя'] || '';
       return `<option value="${escHtml(name)}" ${AnState.manager === name ? 'selected' : ''}>${escHtml(name)}</option>`;
     }).join('');
-    
-    const monthVal = AnState.dailyMonth || getLocalDateString().substring(0, 7);
-    
+
     filtersHtml = `
       <div class="an-filters-container">
         <div class="an-filters-row" style="gap:16px; align-items:flex-end; flex-wrap:wrap;">
           <div class="an-filter-group">
-            <span class="an-filter-label">Выберите месяц</span>
-            <input type="month" id="an-daily-month-select" class="an-filter-date-input" onchange="anDailySetMonth(this.value)" value="${monthVal}" style="height:36px; padding:0 12px; border-radius:10px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:#fff; font-weight:700; cursor:pointer;">
+            <span class="an-filter-label">Дата с</span>
+            <input type="date" id="an-pf-start-date" class="an-filter-date-input" onclick="try{this.showPicker()}catch(e){}" value="${AnState.pfStartDate}" style="height:36px; padding:0 12px; border-radius:10px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:#fff; font-weight:700; cursor:pointer;">
           </div>
           
+          <div class="an-filter-group">
+            <span class="an-filter-label">Дата по</span>
+            <input type="date" id="an-pf-end-date" class="an-filter-date-input" onclick="try{this.showPicker()}catch(e){}" value="${AnState.pfEndDate}" style="height:36px; padding:0 12px; border-radius:10px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:#fff; font-weight:700; cursor:pointer;">
+          </div>
+
+          <div class="an-filter-group">
+            <span class="an-filter-label">План по выручке (₸)</span>
+            <input type="number" id="an-pf-plan-input" placeholder="Введите сумму..." value="${currentPlan > 0 ? currentPlan : ''}" style="height:36px; width:160px; padding:0 12px; border-radius:10px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:#fff; font-weight:700;">
+          </div>
+
           <div class="an-filter-group">
             <span class="an-filter-label">Менеджер</span>
             <select id="an-filter-manager" onchange="anDailySetManager(this.value)" style="height:36px; padding:0 12px; border-radius:10px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:#fff; font-weight:700; cursor:pointer;">
@@ -188,7 +209,10 @@ function renderAnalytics() {
             </select>
           </div>
           
-          <button class="an-refresh-btn" onclick="anRefresh()" style="height:36px; margin:0;">🔄 Обновить данные</button>
+          <div style="display:flex; gap:8px;">
+            <button class="an-date-btn" onclick="anApplyDailyPlan()" style="height:36px; margin:0; line-height:36px; padding:0 16px;">Сформировать</button>
+            <button class="an-refresh-btn" onclick="anRefresh()" style="height:36px; margin:0; line-height:36px; padding:0 16px;">🔄 Обновить</button>
+          </div>
         </div>
       </div>
     `;
@@ -255,31 +279,73 @@ function anSetPeriod(p) {
   AnState.endDate = null;
   renderAnalytics();
 }
-function anDailySetMonth(val) {
-  AnState.dailyMonth = val;
+function anApplyDailyPlan() {
+  const startVal = document.getElementById('an-pf-start-date').value;
+  const endVal = document.getElementById('an-pf-end-date').value;
+  const planVal = parseFloat(document.getElementById('an-pf-plan-input').value) || 0;
+  
+  if (!startVal || !endVal) {
+    toast('Выберите диапазон дат', 'error');
+    return;
+  }
+  
+  AnState.pfStartDate = startVal;
+  AnState.pfEndDate = endVal;
+  AnState.pfPlan = planVal;
+  
+  const planKey = `crm_an_pf_plan_${startVal}_${endVal}_${AnState.manager || 'all'}`;
+  localStorage.setItem(planKey, planVal);
+  
   renderAnalytics();
 }
+
 function anDailySetManager(val) {
   AnState.manager = val;
   renderAnalytics();
 }
+
 async function anRefresh() { await loadAnalytics(); }
+
+// Вспомогательная функция проверки вхождения даты в диапазон
+function isDateInRange(dateStr, startYmd, endYmd) {
+  if (!dateStr) return false;
+  const d = parseDateStr(dateStr);
+  if (!d) return false;
+  
+  const dMid = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const sMid = parseDateStr(startYmd);
+  const eMid = parseDateStr(endYmd);
+  
+  if (!sMid || !eMid) return false;
+  
+  const s = new Date(sMid.getFullYear(), sMid.getMonth(), sMid.getDate());
+  const e = new Date(eMid.getFullYear(), eMid.getMonth(), eMid.getDate());
+  
+  return dMid >= s && dMid <= e;
+}
 
 // ─── Рендер вкладки ежедневной статистики
 function renderTabDaily() {
-  const monthVal = AnState.dailyMonth || getLocalDateString().substring(0, 7);
-  const [yearStr, monthStr] = monthVal.split('-');
-  const year = parseInt(yearStr, 10);
-  const monthIndex = parseInt(monthStr, 10) - 1; // 0-based
+  const start = parseDateStr(AnState.pfStartDate);
+  const end = parseDateStr(AnState.pfEndDate);
   
-  const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+  if (!start || !end) {
+    return `<div class="an-empty">⚠️ Пожалуйста, выберите корректный период дат.</div>`;
+  }
+  
+  if (start > end) {
+    return `<div class="an-empty">⚠️ Начальная дата не может быть больше конечной даты.</div>`;
+  }
+  
+  const dStart = new Date(start.getFullYear(), start.getMonth(), start.getDate(), 12, 0, 0, 0);
+  const dEnd = new Date(end.getFullYear(), end.getMonth(), end.getDate(), 12, 0, 0, 0);
+  const totalDays = Math.round((dEnd - dStart) / (1000 * 60 * 60 * 24)) + 1;
   
   let leads = State.leads || [];
   if (AnState.manager) {
     leads = leads.filter(l => l.fields['Менеджер'] === AnState.manager);
   }
   
-  // Хелпер проверки архивированности
   const activeLeads = leads.filter(l => {
     const activeFields = window.ActiveFieldsCache?.[CONFIG.TABLES.LEADS] || [];
     if (activeFields.includes('Архивирован')) {
@@ -289,9 +355,79 @@ function renderTabDaily() {
     return !localArchived.includes(l.id);
   });
   
+  // Рассчитываем конверсии и плановые показатели за весь выбранный период
+  let avgCheck = 300000, salesConv = 0.40, showRate = 0.70, cashRatio = 1.0;
+  let planScheduled = 0, planConducted = 0, planSales = 0, planRevenue = 0, planCash = 0;
+  
+  if (AnState.pfPlan > 0) {
+    let totalFactScheduled = 0;
+    let totalFactConducted = 0;
+    let totalFactSales = 0;
+    let totalFactRevenue = 0;
+    let totalFactCash = 0;
+    
+    activeLeads.forEach(l => {
+      if (isDateInRange(l.fields['Дата консультации'], AnState.pfStartDate, AnState.pfEndDate)) {
+        totalFactScheduled++;
+        if (l.fields['Консультация проведена'] === true) {
+          totalFactConducted++;
+        }
+      }
+    });
+    
+    leads.forEach(l => {
+      if (getField(l.fields, CONFIG.LEAD_FIELDS.stage) === 'Продано' &&
+          isDateInRange(l.fields['Дата продажи'] || l.fields['Дата'], AnState.pfStartDate, AnState.pfEndDate)) {
+        totalFactSales++;
+        totalFactRevenue += Number(l.fields['Бюджет']) || 0;
+        totalFactCash += Number(l.fields['Оплата']) || 0;
+      }
+    });
+    
+    avgCheck = totalFactSales > 0 ? totalFactRevenue / totalFactSales : 300000;
+    salesConv = totalFactConducted > 0 ? totalFactSales / totalFactConducted : 0.40;
+    showRate = totalFactScheduled > 0 ? totalFactConducted / totalFactScheduled : 0.70;
+    cashRatio = totalFactRevenue > 0 ? totalFactCash / totalFactRevenue : 1.0;
+    
+    planRevenue = AnState.pfPlan;
+    planSales = planRevenue / avgCheck;
+    planConducted = salesConv > 0 ? planSales / salesConv : planSales / 0.40;
+    planScheduled = showRate > 0 ? planConducted / showRate : planConducted / 0.70;
+    planCash = planRevenue * cashRatio;
+  }
+  
   let html = `
     <div class="an-daily-table-container">
-      <table class="an-daily-table">
+      <table class="an-daily-table ${AnState.pfPlan > 0 ? 'pf-active' : ''}">
+  `;
+  
+  if (AnState.pfPlan > 0) {
+    html += `
+        <thead>
+          <tr>
+            <th rowspan="2">Дата</th>
+            <th colspan="2">Назначено конс.</th>
+            <th colspan="2">Проведено конс.</th>
+            <th colspan="2">Кол-во продаж</th>
+            <th colspan="2">Выручка</th>
+            <th colspan="2">В кассу</th>
+          </tr>
+          <tr>
+            <th>План</th>
+            <th>Факт</th>
+            <th>План</th>
+            <th>Факт</th>
+            <th>План</th>
+            <th>Факт</th>
+            <th>План</th>
+            <th>Факт</th>
+            <th>План</th>
+            <th>Факт</th>
+          </tr>
+        </thead>
+    `;
+  } else {
+    html += `
         <thead>
           <tr>
             <th>Дата</th>
@@ -302,100 +438,196 @@ function renderTabDaily() {
             <th>В кассу</th>
           </tr>
         </thead>
-        <tbody>
-  `;
+    `;
+  }
   
-  let weekScheduled = 0, weekConducted = 0, weekSales = 0, weekRevenue = 0, weekCash = 0;
-  let monthScheduled = 0, monthConducted = 0, monthSales = 0, monthRevenue = 0, monthCash = 0;
+  html += '<tbody>';
   
-  let startDay = 1;
+  let wPlanScheduled = 0, wFactScheduled = 0;
+  let wPlanConducted = 0, wFactConducted = 0;
+  let wPlanSales = 0, wFactSales = 0;
+  let wPlanRevenue = 0, wFactRevenue = 0;
+  let wPlanCash = 0, wFactCash = 0;
+  
+  let pPlanScheduled = 0, pFactScheduled = 0;
+  let pPlanConducted = 0, pFactConducted = 0;
+  let pPlanSales = 0, pFactSales = 0;
+  let pPlanRevenue = 0, pFactRevenue = 0;
+  let pPlanCash = 0, pFactCash = 0;
+  
   const daysOfWeekRu = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
+  let current = new Date(dStart.getTime());
+  let weekStart = new Date(current.getTime());
   
-  for (let d = 1; d <= daysInMonth; d++) {
-    const dayStr = String(d).padStart(2, '0');
-    const dateKey = `${year}-${monthStr}-${dayStr}`;
+  while (current <= dEnd) {
+    const y = current.getFullYear();
+    const m = String(current.getMonth() + 1).padStart(2, '0');
+    const dayVal = String(current.getDate()).padStart(2, '0');
+    const dateKey = `${y}-${m}-${dayVal}`;
     
-    const dateObj = new Date(year, monthIndex, d);
-    const dayOfWeek = dateObj.getDay(); // 0 = Вс, 1 = Пн, ...
+    const dayOfWeek = current.getDay(); // 0 = Вс, 1 = Пн, ...
     const dayOfWeekRu = daysOfWeekRu[dayOfWeek];
     const isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
     
-    // 1. Назначено: Все неархивированные лиды с этой датой консультации
+    // Факты
     const dayScheduledLeads = activeLeads.filter(l => isSameDay(l.fields['Дата консультации'], dateKey));
-    const dayScheduled = dayScheduledLeads.length;
+    const dayFactScheduled = dayScheduledLeads.length;
     
-    // 2. Проведено: Лиды с этой датой консультации и флагом "Проведена"
-    const dayConducted = dayScheduledLeads.filter(l => l.fields['Консультация проведена'] === true).length;
+    const dayFactConducted = dayScheduledLeads.filter(l => l.fields['Консультация проведена'] === true).length;
     
-    // 3. Продажи: Лиды на этапе "Продано" с датой продажи на этот день
     const daySalesLeads = leads.filter(l => 
       getField(l.fields, CONFIG.LEAD_FIELDS.stage) === 'Продано' &&
       isSameDay(l.fields['Дата продажи'] || l.fields['Дата'], dateKey)
     );
-    const daySales = daySalesLeads.length;
-    const dayRevenue = daySalesLeads.reduce((s, l) => s + (Number(l.fields['Бюджет']) || 0), 0);
-    const dayCash = daySalesLeads.reduce((s, l) => s + (Number(l.fields['Оплата']) || 0), 0);
+    const dayFactSales = daySalesLeads.length;
+    const dayFactRevenue = daySalesLeads.reduce((s, l) => s + (Number(l.fields['Бюджет']) || 0), 0);
+    const dayFactCash = daySalesLeads.reduce((s, l) => s + (Number(l.fields['Оплата']) || 0), 0);
     
-    weekScheduled += dayScheduled;
-    weekConducted += dayConducted;
-    weekSales += daySales;
-    weekRevenue += dayRevenue;
-    weekCash += dayCash;
+    // Планы на день
+    let dayPlanScheduled = 0;
+    let dayPlanConducted = 0;
+    let dayPlanSales = 0;
+    let dayPlanRevenue = 0;
+    let dayPlanCash = 0;
     
-    monthScheduled += dayScheduled;
-    monthConducted += dayConducted;
-    monthSales += daySales;
-    monthRevenue += dayRevenue;
-    monthCash += dayCash;
+    if (AnState.pfPlan > 0) {
+      dayPlanScheduled = planScheduled / totalDays;
+      dayPlanConducted = planConducted / totalDays;
+      dayPlanSales = planSales / totalDays;
+      dayPlanRevenue = planRevenue / totalDays;
+      dayPlanCash = planCash / totalDays;
+    }
+    
+    wPlanScheduled += dayPlanScheduled; wFactScheduled += dayFactScheduled;
+    wPlanConducted += dayPlanConducted; wFactConducted += dayFactConducted;
+    wPlanSales += dayPlanSales; wFactSales += dayFactSales;
+    wPlanRevenue += dayPlanRevenue; wFactRevenue += dayFactRevenue;
+    wPlanCash += dayPlanCash; wFactCash += dayFactCash;
+    
+    pPlanScheduled += dayPlanScheduled; pFactScheduled += dayFactScheduled;
+    pPlanConducted += dayPlanConducted; pFactConducted += dayFactConducted;
+    pPlanSales += dayPlanSales; pFactSales += dayFactSales;
+    pPlanRevenue += dayPlanRevenue; pFactRevenue += dayFactRevenue;
+    pPlanCash += dayPlanCash; pFactCash += dayFactCash;
     
     const weekendClass = isWeekend ? 'class="weekend-row"' : '';
-    const dateFmt = `${dayStr}.${monthStr}.${year} (${dayOfWeekRu})`;
+    const dateFmt = `${dayVal}.${m}.${y} (${dayOfWeekRu})`;
     
-    html += `
-      <tr ${weekendClass}>
-        <td class="date-cell">${dateFmt}</td>
-        <td>${dayScheduled}</td>
-        <td>${dayConducted}</td>
-        <td>${daySales}</td>
-        <td class="revenue-cell">${dayRevenue > 0 ? fmt(dayRevenue) + ' ₸' : '—'}</td>
-        <td class="cash-cell">${dayCash > 0 ? fmt(dayCash) + ' ₸' : '—'}</td>
-      </tr>
-    `;
-    
-    // Выводим недельный итог
-    if (dayOfWeek === 0 || d === daysInMonth) {
-      const startDayStr = String(startDay).padStart(2, '0');
-      const endDayStr = String(d).padStart(2, '0');
-      
+    if (AnState.pfPlan > 0) {
       html += `
-        <tr class="an-daily-week-total">
-          <td>Итого за неделю (${startDayStr}.${monthStr} - ${endDayStr}.${monthStr})</td>
-          <td>${weekScheduled}</td>
-          <td>${weekConducted}</td>
-          <td>${weekSales}</td>
-          <td>${weekRevenue > 0 ? fmt(weekRevenue) + ' ₸' : '—'}</td>
-          <td>${weekCash > 0 ? fmt(weekCash) + ' ₸' : '—'}</td>
+        <tr ${weekendClass}>
+          <td class="date-cell">${dateFmt}</td>
+          <td class="plan-val">${dayPlanScheduled.toFixed(1)}</td>
+          <td class="fact-val">${dayFactScheduled}</td>
+          <td class="plan-val">${dayPlanConducted.toFixed(1)}</td>
+          <td class="fact-val">${dayFactConducted}</td>
+          <td class="plan-val">${dayPlanSales.toFixed(1)}</td>
+          <td class="fact-val">${dayFactSales}</td>
+          <td class="plan-val revenue-cell">${dayPlanRevenue > 0 ? fmt(Math.round(dayPlanRevenue)) + ' ₸' : '—'}</td>
+          <td class="fact-val revenue-cell">${dayFactRevenue > 0 ? fmt(dayFactRevenue) + ' ₸' : '—'}</td>
+          <td class="plan-val cash-cell">${dayPlanCash > 0 ? fmt(Math.round(dayPlanCash)) + ' ₸' : '—'}</td>
+          <td class="fact-val cash-cell">${dayFactCash > 0 ? fmt(dayFactCash) + ' ₸' : '—'}</td>
         </tr>
       `;
-      
-      weekScheduled = 0;
-      weekConducted = 0;
-      weekSales = 0;
-      weekRevenue = 0;
-      weekCash = 0;
-      startDay = d + 1;
+    } else {
+      html += `
+        <tr ${weekendClass}>
+          <td class="date-cell">${dateFmt}</td>
+          <td>${dayFactScheduled}</td>
+          <td>${dayFactConducted}</td>
+          <td>${dayFactSales}</td>
+          <td class="revenue-cell">${dayFactRevenue > 0 ? fmt(dayFactRevenue) + ' ₸' : '—'}</td>
+          <td class="cash-cell">${dayFactCash > 0 ? fmt(dayFactCash) + ' ₸' : '—'}</td>
+        </tr>
+      `;
     }
+    
+    const isLastDay = (current.getTime() === dEnd.getTime());
+    if (dayOfWeek === 0 || isLastDay) {
+      const startDayStr = String(weekStart.getDate()).padStart(2, '0');
+      const startMonthStr = String(weekStart.getMonth() + 1).padStart(2, '0');
+      const endDayStr = String(current.getDate()).padStart(2, '0');
+      const endMonthStr = String(current.getMonth() + 1).padStart(2, '0');
+      
+      const weekLabel = `Итого за неделю (${startDayStr}.${startMonthStr} - ${endDayStr}.${endMonthStr})`;
+      
+      if (AnState.pfPlan > 0) {
+        html += `
+          <tr class="an-daily-week-total">
+            <td>${weekLabel}</td>
+            <td class="plan-val">${wPlanScheduled.toFixed(1)}</td>
+            <td class="fact-val">${wFactScheduled}</td>
+            <td class="plan-val">${wPlanConducted.toFixed(1)}</td>
+            <td class="fact-val">${wFactConducted}</td>
+            <td class="plan-val">${wPlanSales.toFixed(1)}</td>
+            <td class="fact-val">${wFactSales}</td>
+            <td class="plan-val">${wPlanRevenue > 0 ? fmt(Math.round(wPlanRevenue)) + ' ₸' : '—'}</td>
+            <td class="fact-val">${wFactRevenue > 0 ? fmt(wFactRevenue) + ' ₸' : '—'}</td>
+            <td class="plan-val">${wPlanCash > 0 ? fmt(Math.round(wPlanCash)) + ' ₸' : '—'}</td>
+            <td class="fact-val">${wFactCash > 0 ? fmt(wFactCash) + ' ₸' : '—'}</td>
+          </tr>
+        `;
+      } else {
+        html += `
+          <tr class="an-daily-week-total">
+            <td>${weekLabel}</td>
+            <td>${wFactScheduled}</td>
+            <td>${wFactConducted}</td>
+            <td>${wFactSales}</td>
+            <td>${wFactRevenue > 0 ? fmt(wFactRevenue) + ' ₸' : '—'}</td>
+            <td>${wFactCash > 0 ? fmt(wFactCash) + ' ₸' : '—'}</td>
+          </tr>
+        `;
+      }
+      
+      wPlanScheduled = 0; wFactScheduled = 0;
+      wPlanConducted = 0; wFactConducted = 0;
+      wPlanSales = 0; wFactSales = 0;
+      wPlanRevenue = 0; wFactRevenue = 0;
+      wPlanCash = 0; wFactCash = 0;
+      
+      if (!isLastDay) {
+        const nextDay = new Date(current.getTime());
+        nextDay.setDate(current.getDate() + 1);
+        nextDay.setHours(12, 0, 0, 0);
+        weekStart = nextDay;
+      }
+    }
+    
+    current.setDate(current.getDate() + 1);
+    current.setHours(12, 0, 0, 0);
+  }
+  
+  if (AnState.pfPlan > 0) {
+    html += `
+        <tr class="an-daily-month-total">
+          <td>Итого за период</td>
+          <td class="plan-val">${pPlanScheduled.toFixed(1)}</td>
+          <td class="fact-val">${pFactScheduled}</td>
+          <td class="plan-val">${pPlanConducted.toFixed(1)}</td>
+          <td class="fact-val">${pFactConducted}</td>
+          <td class="plan-val">${pPlanSales.toFixed(1)}</td>
+          <td class="fact-val">${pFactSales}</td>
+          <td class="plan-val">${pPlanRevenue > 0 ? fmt(Math.round(pPlanRevenue)) + ' ₸' : '—'}</td>
+          <td class="fact-val">${pFactRevenue > 0 ? fmt(pFactRevenue) + ' ₸' : '—'}</td>
+          <td class="plan-val">${pPlanCash > 0 ? fmt(Math.round(pPlanCash)) + ' ₸' : '—'}</td>
+          <td class="fact-val">${pFactCash > 0 ? fmt(pFactCash) + ' ₸' : '—'}</td>
+        </tr>
+    `;
+  } else {
+    html += `
+        <tr class="an-daily-month-total">
+          <td>Итого за период</td>
+          <td>${pFactScheduled}</td>
+          <td>${pFactConducted}</td>
+          <td>${pFactSales}</td>
+          <td>${pFactRevenue > 0 ? fmt(pFactRevenue) + ' ₸' : '—'}</td>
+          <td>${pFactCash > 0 ? fmt(pFactCash) + ' ₸' : '—'}</td>
+        </tr>
+    `;
   }
   
   html += `
-        <tr class="an-daily-month-total">
-          <td>Итого за месяц</td>
-          <td>${monthScheduled}</td>
-          <td>${monthConducted}</td>
-          <td>${monthSales}</td>
-          <td>${monthRevenue > 0 ? fmt(monthRevenue) + ' ₸' : '—'}</td>
-          <td>${monthCash > 0 ? fmt(monthCash) + ' ₸' : '—'}</td>
-        </tr>
       </tbody>
     </table>
   </div>

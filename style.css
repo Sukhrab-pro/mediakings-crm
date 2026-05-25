@@ -2820,6 +2820,49 @@ html, body {
   color: #60a5fa;
 }
 
+/* ─── Плановые показатели (План-Факт) ─── */
+.an-daily-table.pf-active th {
+  text-align: center;
+  padding: 8px 10px;
+  font-size: 11px;
+}
+.an-daily-table.pf-active td {
+  padding: 10px 12px;
+  text-align: center;
+}
+.an-daily-table.pf-active td.date-cell {
+  text-align: left;
+}
+.an-daily-table.pf-active .plan-val {
+  color: #94a3b8;
+  font-weight: 500;
+  border-left: 1px solid rgba(255, 255, 255, 0.03);
+}
+.an-daily-table.pf-active .fact-val {
+  color: #f3f4f6;
+  font-weight: 600;
+  border-right: 1px solid rgba(255, 255, 255, 0.03);
+}
+.an-daily-table.pf-active .fact-val.revenue-cell {
+  color: #34d399;
+}
+.an-daily-table.pf-active .fact-val.cash-cell {
+  color: #60a5fa;
+}
+.an-daily-table.pf-active th[colspan="2"] {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+}
+.an-daily-table.pf-active tr.an-daily-week-total td,
+.an-daily-table.pf-active tr.an-daily-month-total td {
+  text-align: center;
+}
+.an-daily-table.pf-active tr.an-daily-week-total td:first-child,
+.an-daily-table.pf-active tr.an-daily-month-total td:first-child {
+  text-align: left;
+}
+
+
 
 
 
