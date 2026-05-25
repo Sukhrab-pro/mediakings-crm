@@ -438,10 +438,154 @@ function logout() {
   location.reload();
 }
 
+// ─── Task reminders notification badge & modal drawer list
+function updateTasksReminderNotification() {
+  const currentUser = localStorage.getItem('crm_current_user');
+  const btnDesktop = document.getElementById('btn-tasks-reminder');
+  const btnMobile = document.getElementById('btn-mobile-tasks-reminder');
+  
+  if (!currentUser || !State.leads || State.leads.length === 0) {
+    if (btnDesktop) btnDesktop.style.display = 'none';
+    if (btnMobile) btnMobile.style.display = 'none';
+    return;
+  }
+
+  // Helper to check if lead is archived (replicated here to avoid load order issues)
+  const isArchivedLocal = (lead) => {
+    const activeFields = window.ActiveFieldsCache?.[CONFIG.TABLES.LEADS] || [];
+    if (activeFields.includes('Архивирован')) {
+      return lead.fields['Архивирован'] === true || lead.fields['Архивирован'] === 'true';
+    }
+    const localArchived = JSON.parse(localStorage.getItem('crm_archived_leads') || '[]');
+    return localArchived.includes(lead.id);
+  };
+
+  const activeLeads = State.leads.filter(l => !isArchivedLocal(l));
+  const todayStr = new Date().toISOString().substring(0, 10);
+  
+  let myTasksCount = 0;
+  activeLeads.forEach(l => {
+    const tasks = safeJsonParse(l.fields['Задачи'] || '[]');
+    const myActiveTodayTasks = tasks.filter(t => !t.done && t.user === currentUser && t.dueDate && t.dueDate <= todayStr);
+    myTasksCount += myActiveTodayTasks.length;
+  });
+
+  const badgeDesktop = document.getElementById('tasks-reminder-badge');
+  const badgeMobile = document.getElementById('mobile-tasks-reminder-badge');
+
+  if (btnDesktop) {
+    btnDesktop.style.display = 'inline-flex';
+    btnDesktop.style.alignItems = 'center';
+    if (myTasksCount > 0) {
+      badgeDesktop.textContent = myTasksCount;
+      badgeDesktop.style.display = 'inline-block';
+      btnDesktop.style.background = 'rgba(239,68,68,0.15)';
+      btnDesktop.style.borderColor = 'rgba(239,68,68,0.3)';
+      btnDesktop.style.color = '#fca5a5';
+    } else {
+      badgeDesktop.style.display = 'none';
+      btnDesktop.style.background = 'rgba(99,102,241,0.1)';
+      btnDesktop.style.borderColor = 'rgba(99,102,241,0.25)';
+      btnDesktop.style.color = '#a5b4fc';
+    }
+  }
+
+  if (btnMobile) {
+    btnMobile.style.display = 'inline-flex';
+    if (myTasksCount > 0) {
+      badgeMobile.textContent = myTasksCount;
+      badgeMobile.style.display = 'flex';
+    } else {
+      badgeMobile.style.display = 'none';
+    }
+  }
+}
+
+function openTasksReminder() {
+  const currentUser = localStorage.getItem('crm_current_user');
+  if (!currentUser) return;
+
+  // Helper to check if lead is archived
+  const isArchivedLocal = (lead) => {
+    const activeFields = window.ActiveFieldsCache?.[CONFIG.TABLES.LEADS] || [];
+    if (activeFields.includes('Архивирован')) {
+      return lead.fields['Архивирован'] === true || lead.fields['Архивирован'] === 'true';
+    }
+    const localArchived = JSON.parse(localStorage.getItem('crm_archived_leads') || '[]');
+    return localArchived.includes(lead.id);
+  };
+
+  const activeLeads = State.leads.filter(l => !isArchivedLocal(l));
+  const todayStr = new Date().toISOString().substring(0, 10);
+  
+  const myTasks = [];
+  activeLeads.forEach(l => {
+    const tasks = safeJsonParse(l.fields['Задачи'] || '[]');
+    const myActiveTodayTasks = tasks.filter(t => !t.done && t.user === currentUser && t.dueDate && t.dueDate <= todayStr);
+    myActiveTodayTasks.forEach(t => {
+      myTasks.push({
+        task: t,
+        leadId: l.id,
+        leadName: getField(l.fields, CONFIG.LEAD_FIELDS.name) || 'Лид',
+        stage: getField(l.fields, CONFIG.LEAD_FIELDS.stage) || 'Новая заявка',
+        phone: getField(l.fields, CONFIG.LEAD_FIELDS.phone) || ''
+      });
+    });
+  });
+
+  // Sort: overdue first, then today
+  myTasks.sort((a, b) => a.task.dueDate.localeCompare(b.task.dueDate));
+
+  const container = document.getElementById('tasks-reminder-content');
+  if (!container) return;
+
+  if (myTasks.length === 0) {
+    container.innerHTML = `
+      <div style="text-align:center; padding:40px 20px; color:var(--text2);">
+        <div style="font-size:42px; margin-bottom:12px;">🎉</div>
+        <div style="font-weight:700; color:#fff; font-size:15px; margin-bottom:4px;">Все задачи выполнены!</div>
+        <div style="font-size:12px;">У вас нет невыполненных задач на сегодня или просроченных задач.</div>
+      </div>
+    `;
+  } else {
+    container.innerHTML = myTasks.map(item => {
+      const isOverdue = item.task.dueDate < todayStr;
+      const isToday = item.task.dueDate === todayStr;
+      const dueClass = isOverdue ? 'overdue' : (isToday ? 'today' : 'future');
+      const dueLabel = isOverdue ? '⚠️ Просрочено: ' : (isToday ? '🔔 Сегодня: ' : 'Срок: ');
+      
+      return `
+        <div class="task-reminder-item" onclick="goToLeadFromTask('${item.leadId}', '${escHtml(item.stage)}')" style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); padding:12px 14px; border-radius:12px; margin-bottom:8px; cursor:pointer; transition:all 0.2s;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:4px;">
+            <div style="font-weight:700; color:#fff; font-size:14px;">🎯 ${escHtml(item.leadName)}</div>
+            <span class="task-due ${dueClass}" style="font-size:11px; font-weight:700; padding:2px 6px; border-radius:6px;">${dueLabel}${formatDate(item.task.dueDate)}</span>
+          </div>
+          <div style="font-size:13px; color:var(--text1); margin-bottom:8px; line-height:1.4;">${escHtml(item.task.text)}</div>
+          <div style="font-size:11px; color:var(--text2); display:flex; justify-content:space-between; align-items:center;">
+            <span>📁 Этап: ${escHtml(item.stage)}</span>
+            ${item.phone ? `<span>📱 ${escHtml(item.phone)}</span>` : ''}
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  openDrawer('drawer-tasks');
+}
+
+function goToLeadFromTask(leadId, stage) {
+  closeDrawer('drawer-tasks');
+  openLeadDetail(leadId, stage);
+}
+
 window.submitLogin = submitLogin;
 window.logout = logout;
 window.initApp = initApp;
+window.updateTasksReminderNotification = updateTasksReminderNotification;
+window.openTasksReminder = openTasksReminder;
+window.goToLeadFromTask = goToLeadFromTask;
 
 initApp();
+
 
 

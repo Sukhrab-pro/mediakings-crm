@@ -951,6 +951,23 @@ function renderKanban(leads) {
               ${igHandle ? `<div class="kanban-card-sub" style="color:#c026d3; cursor:pointer;" onclick="event.stopPropagation(); copyInstagram('${escHtml(igRaw)}')">📸 ${escHtml(igHandle)}</div>` : ''}
               ${cd     ? `<div class="kanban-card-sub" style="color:#3b82f6">📅 ${escHtml(cd)} ${escHtml(lead.fields['Время консультации']||'')}</div>` :
                 date    ? `<div class="kanban-card-sub">📋 ${date}</div>` : ''}
+              ${(() => {
+                const tasksList = safeJsonParse(lead.fields['Задачи'] || '[]');
+                const activeTasksList = tasksList.filter(t => !t.done && t.dueDate);
+                if (activeTasksList.length === 0) return '';
+                
+                // Сортируем задачи по возрастанию срока, чтобы найти ближайшую
+                activeTasksList.sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+                const t = activeTasksList[0];
+                
+                const todayStr = new Date().toISOString().substring(0, 10);
+                const isOverdue = t.dueDate < todayStr;
+                const isToday = t.dueDate === todayStr;
+                const color = isOverdue ? '#fca5a5' : (isToday ? '#fcd34d' : '#93c5fd'); // мягкий красный, желтый, голубой
+                const icon = isOverdue ? '⚠️' : '🔔';
+                
+                return `<div class="kanban-card-sub" style="color:${color}; font-weight:600; font-size:11px;" title="${escHtml(t.text)}">${icon} ${formatDate(t.dueDate)}: ${escHtml(t.text)}</div>`;
+              })()}
               ${budget  ? `<div class="kanban-card-sub" style="color:#34d399">💰 ${Number(budget).toLocaleString('ru-RU')} ₸</div>` : ''}
               ${nonTargetReason ? `<div class="kanban-card-sub" style="color:#94a3b8;font-size:11px">🚫 ${escHtml(nonTargetReason)}</div>` : ''}
               ${src    ? `<div class="kanban-card-sub" style="opacity:.6">${escHtml(src)}</div>` : ''}
@@ -970,6 +987,7 @@ function renderKanban(leads) {
   initDragDrop();
   initCardClicks();
   updateSelectionBar();
+  if (window.updateTasksReminderNotification) window.updateTasksReminderNotification();
 }
 
 function initCardClicks() {
@@ -1329,6 +1347,10 @@ async function handleStageDrop(leadId, newStage, fromStage, beforeId) {
     openNonTargetModal([leadId]);
     return;
   }
+  if (newStage === 'Связаться позднее') {
+    openContactLaterModal(leadId, newStage, fromStage, beforeId);
+    return;
+  }
   await updateLeadStageOptimistic(leadId, newStage, fromStage, beforeId);
 }
 
@@ -1421,6 +1443,10 @@ async function updateLeadStage(id, newStage) {
   const oldStage = lead?.fields[stageField] || '';
   if (newStage === 'Не целевой') {
     openNonTargetModal([id]);
+    return;
+  }
+  if (newStage === 'Связаться позднее') {
+    openContactLaterModal(id, newStage, oldStage);
     return;
   }
   
@@ -1704,6 +1730,7 @@ async function addLeadTask(id) {
     await Airtable.update(CONFIG.TABLES.LEADS, id, updates);
     Object.assign(lead.fields, updates);
     renderLeadMiddleColumn(lead);
+    renderKanban(State.leads);
     toast('Задача добавлена ✓');
   } catch (e) {
     toast('Ошибка добавления задачи: ' + e.message, 'error');
@@ -1741,6 +1768,7 @@ async function toggleTaskDone(leadId, taskId) {
     await Airtable.update(CONFIG.TABLES.LEADS, leadId, updates);
     Object.assign(lead.fields, updates);
     renderLeadMiddleColumn(lead);
+    renderKanban(State.leads);
     toast(task.done ? 'Задача выполнена ✓' : 'Задача возвращена в работу');
   } catch (e) {
     toast('Ошибка обновления задачи: ' + e.message, 'error');
@@ -3277,6 +3305,162 @@ async function confirmReject() {
   }
 }
 
+let _contactLaterLeadId = null;
+let _contactLaterNewStage = null;
+let _contactLaterFromStage = null;
+let _contactLaterBeforeId = null;
+
+function openContactLaterModal(leadId, newStage, fromStage, beforeId) {
+  _contactLaterLeadId = leadId;
+  _contactLaterNewStage = newStage;
+  _contactLaterFromStage = fromStage;
+  _contactLaterBeforeId = beforeId;
+
+  const lead = State.leads.find(l => l.id === leadId);
+  if (!lead) return;
+
+  const leadName = getField(lead.fields, CONFIG.LEAD_FIELDS.name) || 'Лид';
+  const leadPhone = getField(lead.fields, CONFIG.LEAD_FIELDS.phone) || '';
+
+  const infoEl = document.getElementById('contact-later-lead-info');
+  if (infoEl) {
+    infoEl.innerHTML = `
+      <div style="font-weight:700; font-size:14px; color:#fff;">🎯 ${escHtml(leadName)}</div>
+      ${leadPhone ? `<div style="font-size:12px; color:var(--text2); margin-top:4px;">📱 ${escHtml(leadPhone)}</div>` : ''}
+    `;
+  }
+
+  // Заполняем дефолтную дату: завтрашний день
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowStr = tomorrow.toISOString().substring(0, 10);
+  
+  const dateEl = document.getElementById('contact-later-date');
+  if (dateEl) {
+    dateEl.value = tomorrowStr;
+  }
+
+  const textEl = document.getElementById('contact-later-text');
+  if (textEl) {
+    textEl.value = 'Связаться позднее';
+  }
+
+  openDrawer('drawer-contact-later');
+}
+
+function cancelContactLater() {
+  closeDrawer('drawer-contact-later');
+  // Сбрасываем Kanban, чтобы вернуть карточку на прежнее место, если перенос был через drag-and-drop
+  renderKanban(State.leads);
+  _contactLaterLeadId = null;
+  _contactLaterNewStage = null;
+  _contactLaterFromStage = null;
+  _contactLaterBeforeId = null;
+}
+
+async function confirmContactLater() {
+  const leadId = _contactLaterLeadId;
+  if (!leadId) return;
+
+  const dateEl = document.getElementById('contact-later-date');
+  const textEl = document.getElementById('contact-later-text');
+  const dueDate = dateEl?.value;
+  const text = textEl?.value.trim();
+
+  if (!dueDate) { toast('Выберите дату для следующего контакта', 'error'); return; }
+  if (!text) { toast('Укажите цель контакта или комментарий', 'error'); return; }
+
+  const lead = State.leads.find(l => l.id === leadId);
+  if (!lead) return;
+
+  const btn = document.getElementById('confirm-contact-later-btn');
+  if (btn) {
+    btn.innerHTML = '<span class="spinner"></span> Сохранение...';
+    btn.disabled = true;
+  }
+
+  try {
+    const currentUser = localStorage.getItem('crm_current_user') || 'Система';
+    const dateStr = new Date().toLocaleString('ru-RU');
+
+    // 1. Создаем новую задачу
+    const tasks = safeJsonParse(lead.fields['Задачи'] || '[]');
+    const newTask = {
+      id: 't_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+      text: text,
+      dueDate: dueDate,
+      done: false,
+      createdAt: dateStr,
+      completedAt: '',
+      user: currentUser
+    };
+    tasks.push(newTask);
+
+    // 2. Логируем смену этапа и создание задачи в историю
+    const history = safeJsonParse(lead.fields['История'] || '[]');
+    if (_contactLaterFromStage && _contactLaterFromStage !== _contactLaterNewStage) {
+      history.unshift({
+        date: dateStr,
+        user: currentUser,
+        type: 'stage_change',
+        details: `Этап: «${_contactLaterFromStage || '—'}» → «${_contactLaterNewStage}»`
+      });
+    }
+    history.unshift({
+      date: dateStr,
+      user: currentUser,
+      type: 'task_create',
+      details: `Создана задача при переносе на «Связаться позднее»: "${text}" (срок: ${formatDate(dueDate)})`
+    });
+
+    const stageField = getStageFieldName(lead.fields);
+    const stageObj = FUNNEL_STAGES.find(s => s.key === _contactLaterNewStage);
+    const stageId = stageObj ? stageObj.id : null;
+
+    const updates = {
+      [stageField]: stageId || [],
+      'Задачи': JSON.stringify(tasks),
+      'История': JSON.stringify(history)
+    };
+
+    // Оптимистично обновляем локальный стейт
+    Object.assign(lead.fields, {
+      [stageField]: _contactLaterNewStage,
+      [stageField + ' ID']: stageId ? String(stageId) : '',
+      'Задачи': JSON.stringify(tasks),
+      'История': JSON.stringify(history)
+    });
+
+    if (_contactLaterBeforeId !== undefined) {
+      reorderLocalLeads(leadId, _contactLaterBeforeId);
+    }
+
+    closeDrawer('drawer-contact-later');
+    renderKanban(State.leads);
+    
+    // Сохраняем в Airtable
+    await Airtable.update(CONFIG.TABLES.LEADS, leadId, updates);
+    if (_contactLaterBeforeId !== undefined) {
+      await moveBaserowRow(CONFIG.TABLES.LEADS, leadId, _contactLaterBeforeId);
+    }
+
+    toast('Этап обновлен и задача запланирована ✓');
+  } catch (e) {
+    // В случае ошибки сбрасываем состояние
+    toast('Ошибка сохранения: ' + e.message, 'error');
+    await loadLeads(); // Перезагружаем с сервера для надежности
+  } finally {
+    if (btn) {
+      btn.innerHTML = '📅 Запланировать и перенести';
+      btn.disabled = false;
+    }
+    _contactLaterLeadId = null;
+    _contactLaterNewStage = null;
+    _contactLaterFromStage = null;
+    _contactLaterBeforeId = null;
+  }
+}
+
 // ════════════════════════════
 // ПЕРЕИМЕНОВАНИЕ КОЛОНКИ
 // ════════════════════════════
@@ -3810,5 +3994,8 @@ window.goToday = goToday;
 window.onCalendarFilterChange = onCalendarFilterChange;
 window.selectMobileDate = selectMobileDate;
 window.goMobileDay = goMobileDay;
+window.openContactLaterModal = openContactLaterModal;
+window.cancelContactLater = cancelContactLater;
+window.confirmContactLater = confirmContactLater;
 
 

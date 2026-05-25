@@ -42,6 +42,9 @@
 <div id="mobile-topbar" class="mobile-topbar">
   <button class="mobile-back-btn" id="mobile-back-btn" onclick="mobileGoBack()">‹ Назад</button>
   <div class="mobile-topbar-title" id="mobile-topbar-title">🎯 Лиды</div>
+  <button class="mobile-topbar-action" id="btn-mobile-tasks-reminder" onclick="openTasksReminder()" title="Мои задачи" style="display:none; position:relative; font-size:18px; margin-right:8px; background:none; border:none; color:#fff; align-items:center; justify-content:center; width:36px; height:36px; padding:0;">
+    🔔<span id="mobile-tasks-reminder-badge" style="display:none; position:absolute; top:2px; right:2px; background:#ef4444; color:#fff; font-size:9px; font-weight:800; width:15px; height:15px; border-radius:50%; align-items:center; justify-content:center; line-height:1;">0</span>
+  </button>
   <button class="mobile-topbar-action" onclick="openPipelineSettings()" title="Настройка">⚙️</button>
 </div>
 
@@ -54,6 +57,9 @@
     </button>
   </div>
   <div style="display:flex; gap:8px; align-items:center;">
+    <button class="header-btn" id="btn-tasks-reminder" onclick="openTasksReminder()" title="Мои задачи" style="gap:6px; font-size:12px; padding:6px 12px; height:34px; position:relative; background:rgba(99,102,241,0.1); border:1px solid rgba(99,102,241,0.25); color:#a5b4fc; display:none; align-items:center;">
+      🔔 Мои задачи <span id="tasks-reminder-badge" style="display:none; background:#ef4444; color:#fff; font-size:10px; font-weight:800; padding:2px 6px; border-radius:10px; margin-left:4px; line-height:1;">0</span>
+    </button>
     <button class="header-btn" id="btn-refresh-data" onclick="refreshCRMData()" title="Обновить данные" style="gap:6px; font-size:12px; padding:6px 12px; height:34px;">
       <span class="refresh-icon" style="display:inline-block;">🔄</span> Обновить
     </button>
@@ -265,6 +271,19 @@
   </div>
 </div>
 
+<!-- Tasks reminder drawer -->
+<div id="drawer-tasks" class="overlay">
+  <div class="drawer" style="max-width: 500px;">
+    <button class="drawer-close-btn" onclick="closeDrawer('drawer-tasks')">&times;</button>
+    <div class="drawer-header" style="border-bottom:1px solid rgba(255,255,255,0.06); padding-bottom:12px; margin-bottom:16px;">
+      <h3 class="drawer-title" style="margin:0; font-size:18px; font-weight:800; color:#fff;">📋 Мои задачи на сегодня</h3>
+    </div>
+    <div id="tasks-reminder-content" style="max-height: calc(100vh - 120px); overflow-y: auto;">
+      <!-- Tasks list loaded dynamically -->
+    </div>
+  </div>
+</div>
+
 
 <!-- Add Lead -->
 <div id="drawer-lead" class="overlay">
@@ -440,6 +459,26 @@
     </div>
     <button id="confirm-reject-btn" class="btn btn-secondary" onclick="confirmReject()" style="background:rgba(100,116,139,0.15);color:#94a3b8;border:1px solid rgba(100,116,139,0.35)">🚫 Отметить не целевым</button>
     <button class="btn btn-secondary" onclick="cancelReject()">Отмена</button>
+  </div>
+</div>
+
+<!-- Contact later schedule modal -->
+<div id="drawer-contact-later" class="overlay">
+  <div class="drawer">
+    <button class="drawer-close-btn" onclick="cancelContactLater()">&times;</button>
+    <div class="drawer-handle"></div>
+    <div class="drawer-title">📅 Планирование контакта</div>
+    <div id="contact-later-lead-info" class="card" style="margin-bottom:16px; border-color:rgba(99,102,241,0.4)"></div>
+    <div class="form-group">
+      <label class="form-label">Когда связаться? *</label>
+      <input id="contact-later-date" class="form-input" type="date" onclick="try{this.showPicker()}catch(e){}"/>
+    </div>
+    <div class="form-group" style="margin-top:12px">
+      <label class="form-label">Что нужно сделать? / Комментарий *</label>
+      <input id="contact-later-text" class="form-input" type="text" placeholder="Например: Позвонить и узнать решение по КП"/>
+    </div>
+    <button id="confirm-contact-later-btn" class="btn btn-primary" onclick="confirmContactLater()" style="margin-top:16px;">📅 Запланировать и перенести</button>
+    <button class="btn btn-secondary" onclick="cancelContactLater()">Отмена</button>
   </div>
 </div>
 
