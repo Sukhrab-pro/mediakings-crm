@@ -140,6 +140,9 @@ const FIELD_MAPS = {
         'Причина: Не целевой':'Причина: Не целевой',
         'Оплата':'Оплата',
         'Instagram':'Instagram',
+        'Задачи':'Задачи',
+        'История':'История',
+        'Комментарии_Лог':'Комментарии_Лог',
       };
     },
     get [CONFIG.TABLES.CLIENTS]() {
@@ -249,6 +252,9 @@ const FIELD_MAPS = {
         'Ссылка на запись':'Ссылка на запись',
         'Оплата':'Оплата',
         'Instagram':'Instagram',
+        'Задачи':'Задачи',
+        'История':'История',
+        'Комментарии_Лог':'Комментарии_Лог',
       };
     },
     get [CONFIG.TABLES.CLIENTS]() {
@@ -394,6 +400,7 @@ function denormalizeFields(fields, tableId) {
     // Fields that can be explicitly set to null (e.g. to clear a single_select)
     const nullableFields = [
       'Причина: Не целевой', 'Бюджет', 'Ссылка на запись', 'Оплата', 'Instagram',
+      'Задачи', 'История', 'Комментарии_Лог',
       // Project fields
       'Стоимость заказа', 'Оплачено',
       'Дата начала', 'Сроки заказа План', 'Сроки заказа Факт', 'Дата завершения',
