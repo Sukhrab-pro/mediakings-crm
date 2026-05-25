@@ -972,11 +972,6 @@ function renderKanban(leads) {
               ${budget  ? `<div class="kanban-card-sub" style="color:#34d399">💰 ${Number(budget).toLocaleString('ru-RU')} ₸</div>` : ''}
               ${nonTargetReason ? `<div class="kanban-card-sub" style="color:#94a3b8;font-size:11px">🚫 ${escHtml(nonTargetReason)}</div>` : ''}
               ${src    ? `<div class="kanban-card-sub" style="opacity:.6">${escHtml(src)}</div>` : ''}
-              <div class="kanban-card-actions" style="margin-top:6px; display:flex; justify-content:flex-end;">
-                <button class="card-action-btn" onclick="event.stopPropagation(); openQuickTaskModal('${lead.id}')" title="Быстрая задача" style="background:none; border:none; padding:2px 6px; color:var(--text2); font-size:10px; display:flex; align-items:center; gap:4px; border-radius:4px; transition:all 0.2s; cursor:pointer;">
-                  ➕📅 Задача
-                </button>
-              </div>
             </div>`;
           }).join('')}
       </div>
@@ -1488,7 +1483,6 @@ function renderLeadMiddleColumn(lead) {
 
   const f = lead.fields;
   const tasks = safeJsonParse(f['Задачи'] || '[]');
-  const comments = safeJsonParse(f['Комментарии_Лог'] || '[]');
   const history = safeJsonParse(f['История'] || '[]');
   const id = lead.id;
 
@@ -1499,152 +1493,149 @@ function renderLeadMiddleColumn(lead) {
     return `<option value="${escHtml(name)}" ${currentUser === name ? 'selected' : ''}>${escHtml(name)}</option>`;
   }).join('');
 
-  const activeTasks = tasks.filter(t => !t.done);
-  const completedTasks = tasks.filter(t => t.done);
-
-  // Sort active tasks by dueDate (ascending)
-  activeTasks.sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
-  // Sort completed tasks by completedAt (descending)
-  completedTasks.sort((a, b) => {
-    // Parser for "dd.mm.yyyy hh:mm"
-    const parseDateTime = (str) => {
-      if (!str) return 0;
-      const parts = str.split(' ');
-      if (parts.length < 2) return 0;
-      const dParts = parts[0].split('.');
-      const tParts = parts[1].split(':');
-      if (dParts.length < 3 || tParts.length < 2) return 0;
-      return new Date(dParts[2], dParts[1] - 1, dParts[0], tParts[0], tParts[1]).getTime();
-    };
-    return parseDateTime(b.completedAt) - parseDateTime(a.completedAt);
-  });
-
   const todayStr = new Date().toLocaleDateString('en-CA');
 
-  const activeTasksHtml = activeTasks.length === 0 
-    ? '<div style="color:var(--text2); font-size:13px; font-style:italic; padding:6px 0;">Нет активных задач</div>'
-    : activeTasks.map(t => {
-        const isOverdue = t.dueDate < todayStr;
-        const isToday = t.dueDate === todayStr;
-        const dueClass = isOverdue ? 'overdue' : (isToday ? 'today' : 'future');
-        const dueLabel = isOverdue ? 'Просрочено: ' : (isToday ? 'Сегодня: ' : 'Срок: ');
-        const timeStr = t.dueTime ? ` в ${t.dueTime}` : '';
-        return `
-          <div class="task-item">
-            <input type="checkbox" class="task-checkbox" onclick="toggleTaskDone('${id}', '${t.id}')">
-            <div class="task-content">
-              <div class="task-text">${escHtml(t.text)}</div>
-              <div class="task-meta">
-                <span>👤 ${escHtml(t.user || '—')}</span>
-                <span class="task-due ${dueClass}">${dueLabel}${formatDate(t.dueDate)}${timeStr}</span>
-              </div>
-            </div>
-          </div>
-        `;
-      }).join('');
-
-  const completedTasksHtml = completedTasks.length === 0
-    ? '<div style="color:var(--text2); font-size:12px; font-style:italic; padding:6px 0;">Нет выполненных задач</div>'
-    : completedTasks.map(t => `
-        <div class="task-item completed">
-          <input type="checkbox" class="task-checkbox" checked onclick="toggleTaskDone('${id}', '${t.id}')">
-          <div class="task-content">
-            <div class="task-text">${escHtml(t.text)}</div>
-            <div class="task-meta">
-              <span>👤 ${escHtml(t.user || '—')}</span>
-              <span>Выполнено: ${escHtml(t.completedAt)}</span>
-            </div>
-          </div>
-        </div>
-      `).join('');
-
-  const commentsHtml = comments.length === 0
-    ? '<div style="color:var(--text2); font-size:13px; font-style:italic; padding:8px 0;">Нет комментариев</div>'
-    : comments.map(c => `
-        <div class="comment-bubble">
-          <div class="comment-header">
-            <span class="comment-user">👤 ${escHtml(c.user || '—')}</span>
-            <span class="comment-date">${escHtml(c.date)}</span>
-          </div>
-          <div class="comment-body">${escHtml(c.text)}</div>
-        </div>
-      `).join('');
-
-  const historyHtml = history.length === 0
-    ? '<div style="color:var(--text2); font-size:12px; font-style:italic; padding:6px 0;">Нет истории</div>'
-    : history.map(h => {
-        let icon = '📝';
-        if (h.type === 'stage_change') icon = '🔄';
-        else if (h.type === 'task_create') icon = '➕';
-        else if (h.type === 'task_done') icon = '✅';
-        else if (h.type === 'comment_add') icon = '💬';
-        else if (h.type === 'edit_fields') icon = '⚙️';
+  const timelineHtml = history.length === 0
+    ? '<div style="color:var(--text2); font-size:13px; font-style:italic; text-align:center; padding:40px 0;">История пуста. Напишите первый комментарий или поставьте задачу!</div>'
+    : history.map((h) => {
+        const isComment = h.type === 'comment_add';
+        const isTaskCreate = h.type === 'task_create';
+        const isTaskDone = h.type === 'task_done';
+        const isStageChange = h.type === 'stage_change';
         
-        return `
-          <div class="history-item">
-            <div class="history-meta">
-              <span>${icon} ${escHtml(h.user || '—')}</span>
-              <span>${escHtml(h.date)}</span>
+        let icon = '📝';
+        let bg = 'rgba(255,255,255,0.02)';
+        let border = '1px solid rgba(255,255,255,0.04)';
+        
+        if (isStageChange) {
+          icon = '🔄';
+          bg = 'rgba(59,130,246,0.04)';
+          border = '1px solid rgba(59,130,246,0.15)';
+        } else if (isTaskCreate) {
+          icon = '➕';
+          bg = 'rgba(245,158,11,0.04)';
+          border = '1px solid rgba(245,158,11,0.15)';
+        } else if (isTaskDone) {
+          icon = '✅';
+          bg = 'rgba(16,185,129,0.04)';
+          border = '1px solid rgba(16,185,129,0.15)';
+        } else if (isComment) {
+          icon = '💬';
+          bg = 'rgba(99,102,241,0.06)';
+          border = '1px solid rgba(99,102,241,0.15)';
+        }
+
+        // Render comment in chat style
+        if (isComment) {
+          const isCurrentUserComment = (h.user === currentUser);
+          const alignStyle = isCurrentUserComment 
+            ? 'align-self: flex-end; margin-left: 20%; background:rgba(99,102,241,0.15); border-color:rgba(99,102,241,0.3); border-bottom-right-radius:4px;' 
+            : 'align-self: flex-start; margin-right: 20%; border-bottom-left-radius:4px;';
+          
+          let commentText = h.details || '';
+          if (commentText.startsWith('Добавлен комментарий: "')) {
+            commentText = commentText.replace(/^Добавлен комментарий:\s*"/, '').replace(/"$/, '');
+          }
+          
+          return `
+            <div class="timeline-comment-bubble" style="display:flex; flex-direction:column; padding:10px 14px; border-radius:16px; border:1px solid rgba(255,255,255,0.06); margin-bottom:4px; max-width:100%; box-shadow: 0 2px 6px rgba(0,0,0,0.1); ${alignStyle}">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; gap:8px;">
+                <span style="font-weight:700; font-size:11px; color:#a5b4fc;">👤 ${escHtml(h.user || '—')}</span>
+                <span style="font-size:10px; color:var(--text3);">${escHtml(h.date)}</span>
+              </div>
+              <div style="font-size:13px; color:#fff; line-height:1.4; word-break:break-word; white-space:pre-wrap;">${escHtml(commentText)}</div>
             </div>
-            <div class="history-details">${escHtml(h.details)}</div>
+          `;
+        }
+
+        // Render task item with interactive checkbox
+        if (isTaskCreate && h.taskId) {
+          const task = tasks.find(t => t.id === h.taskId);
+          if (task) {
+            const isOverdue = !task.done && task.dueDate && task.dueDate < todayStr;
+            const isToday = !task.done && task.dueDate === todayStr;
+            const dueClass = isOverdue ? 'overdue' : (isToday ? 'today' : 'future');
+            const timeStr = task.dueTime ? ` в ${task.dueTime}` : '';
+            const statusLabel = task.done ? 'Выполнено' : (isOverdue ? 'Просрочено' : (isToday ? 'Сегодня' : 'Предстоит'));
+            
+            return `
+              <div class="timeline-task-card" style="background:${bg}; border:${border}; border-radius:12px; padding:12px; margin-bottom:4px; display:flex; gap:10px; align-items:flex-start; box-shadow: 0 2px 6px rgba(0,0,0,0.1); align-self: stretch;">
+                <input type="checkbox" class="task-checkbox" ${task.done ? 'checked' : ''} onclick="toggleTaskDone('${id}', '${task.id}')" style="margin-top:2px; width:16px; height:16px; cursor:pointer; flex-shrink:0;">
+                <div style="flex:1;">
+                  <div style="font-size:13px; font-weight:600; color:#fff; ${task.done ? 'text-decoration:line-through; opacity:0.6;' : ''}">${escHtml(task.text)}</div>
+                  <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:6px; font-size:10px;">
+                    <span style="color:var(--text2)">👤 ${escHtml(task.user || '—')}</span>
+                    <span class="task-due ${dueClass}" style="font-weight:700; padding:1px 6px; border-radius:4px;">${statusLabel}: ${formatDate(task.dueDate)}${timeStr}</span>
+                  </div>
+                </div>
+              </div>
+            `;
+          }
+        }
+
+        // Standard history item
+        return `
+          <div class="timeline-history-item" style="background:${bg}; border:${border}; border-radius:10px; padding:10px 12px; display:flex; flex-direction:column; gap:4px; font-size:12px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom:4px; align-self: stretch;">
+            <div style="display:flex; justify-content:space-between; align-items:center; color:var(--text2);">
+              <span style="font-weight:700;">${icon} ${escHtml(h.user || '—')}</span>
+              <span style="font-size:10px; color:var(--text3);">${escHtml(h.date)}</span>
+            </div>
+            <div style="color:var(--text1); line-height:1.4; white-space:pre-wrap;">${escHtml(h.details)}</div>
           </div>
         `;
       }).join('');
 
   container.innerHTML = `
-    <!-- User Selector -->
-    <div class="user-selector-container">
-      <span style="font-weight:700">Кто делает:</span>
-      <select id="lead-current-user" class="form-select compact-input" style="flex:1; padding:4px 8px !important; height:28px !important; font-size:12px !important; margin:0;" onchange="localStorage.setItem('crm_current_user', this.value)">
-        <option value="">— Выберите себя —</option>
-        ${empOptions}
-      </select>
-    </div>
-
-    <!-- Active Tasks -->
-    <div class="middle-col-section">
-      <div class="section-subtitle">📋 Задачи</div>
-      <div class="active-tasks-list">${activeTasksHtml}</div>
+    <div style="display:flex; flex-direction:column; height: 100%; box-sizing: border-box;">
       
-      <!-- Add Task Form -->
-      <div class="inline-form" style="margin-top:12px; padding:10px; background:rgba(255,255,255,0.02); border-radius:8px; border:1px solid rgba(255,255,255,0.04)">
-        <div style="font-size:12px; font-weight:700; color:var(--text2); margin-bottom:6px;">Новая задача:</div>
-        <input type="text" id="ei-new-task-text" class="form-input compact-input" placeholder="Что нужно сделать..." style="width:100%; margin-bottom:6px; min-height: unset !important;">
-        <div class="inline-form-row" style="display:flex; gap:6px;">
-          <input type="date" id="ei-new-task-date" class="form-input compact-input" onclick="try{this.showPicker()}catch(e){}" style="flex:1;">
-          <input type="time" id="ei-new-task-time" class="form-input compact-input" onclick="try{this.showPicker()}catch(e){}" style="width:85px;">
-          <button class="btn btn-save-compact" onclick="addLeadTask('${id}')" style="padding:6px 12px !important; font-size:12px !important; height:34px !important; margin:0;">Добавить</button>
+      <!-- Top form section: User & Add Task -->
+      <div style="padding:12px; border-bottom:1px solid rgba(255,255,255,0.06); flex-shrink:0;">
+        <div class="user-selector-container" style="margin-bottom:10px; display:flex; align-items:center; gap:8px;">
+          <span style="font-weight:700; font-size:13px; color:var(--text2);">Кто делает:</span>
+          <select id="lead-current-user" class="form-select compact-input" style="flex:1; padding:4px 8px !important; height:28px !important; font-size:12px !important; margin:0;" onchange="localStorage.setItem('crm_current_user', this.value)">
+            <option value="">— Выберите себя —</option>
+            ${empOptions}
+          </select>
+        </div>
+
+        <div style="padding:10px; background:rgba(255,255,255,0.02); border-radius:12px; border:1px solid rgba(255,255,255,0.04)">
+          <div style="font-size:11px; font-weight:700; color:var(--text2); margin-bottom:6px; display:flex; align-items:center; gap:4px;">📌 Поставить задачу с напоминанием:</div>
+          <input type="text" id="ei-new-task-text" class="form-input compact-input" placeholder="Что нужно напомнить..." style="width:100%; margin-bottom:6px; min-height: unset !important;">
+          <div class="inline-form-row" style="display:flex; gap:6px; align-items:center;">
+            <input type="date" id="ei-new-task-date" class="form-input compact-input" onclick="try{this.showPicker()}catch(e){}" style="flex:1; height:28px !important; font-size:12px !important; padding:2px 6px !important;">
+            <input type="time" id="ei-new-task-time" class="form-input compact-input" onclick="try{this.showPicker()}catch(e){}" style="width:80px; height:28px !important; font-size:12px !important; padding:2px 6px !important;" title="Время напоминания">
+            <button class="btn btn-save-compact" onclick="addLeadTask('${id}')" style="padding:4px 10px !important; font-size:12px !important; height:28px !important; margin:0; line-height:1;">Поставить</button>
+          </div>
         </div>
       </div>
 
-      <!-- Completed Tasks Collapsible -->
-      <details style="margin-top:10px; cursor:pointer;">
-        <summary style="font-size:12px; color:var(--text2); font-weight:600; outline:none; padding:4px 0;">Выполненные задачи (${completedTasks.length})</summary>
-        <div style="margin-top:8px; max-height:150px; overflow-y:auto; padding-right:4px;">${completedTasksHtml}</div>
-      </details>
-    </div>
-
-    <!-- Comments -->
-    <div class="middle-col-section">
-      <div class="section-subtitle">💬 Комментарии</div>
-      
-      <!-- Add Comment Form -->
-      <div class="inline-form" style="margin-bottom:12px;">
-        <textarea id="ei-new-comment" class="form-input compact-input" placeholder="Напишите комментарий..." style="height:60px !important; min-height:60px !important; width:100%; resize:vertical;"></textarea>
-        <div style="display:flex; justify-content:flex-end; margin-top: 6px;">
-          <button class="btn btn-save-compact" onclick="addLeadComment('${id}')" style="padding:6px 12px !important; font-size:12px !important;">Отправить</button>
+      <!-- Scrolling timeline section -->
+      <div style="flex:1; overflow-y:auto; padding:12px; display:flex; flex-direction:column; gap:8px;" id="lead-timeline-scroller">
+        <div style="font-size:12px; font-weight:800; color:var(--text2); text-transform:uppercase; letter-spacing:0.05em; display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; flex-shrink:0;">
+          <span>📜 Лента активности</span>
+          <span style="font-size:10px; font-weight:600; text-transform:none; color:var(--text3);">${history.length} событий</span>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          ${timelineHtml}
         </div>
       </div>
 
-      <div class="comments-list">${commentsHtml}</div>
-    </div>
+      <!-- Bottom Chat comment field -->
+      <div style="padding:10px 12px; border-top:1px solid rgba(255,255,255,0.06); flex-shrink:0; background:rgba(0,0,0,0.15);">
+        <div style="display:flex; gap:8px; align-items:center; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:20px; padding:2px 6px 2px 14px;">
+          <textarea id="ei-new-comment" class="form-input compact-input" placeholder="Написать комментарий в историю..." style="flex:1; border:none !important; background:none !important; padding:6px 0 !important; margin:0 !important; height:28px !important; min-height:28px !important; max-height:80px; resize:none; font-size:13px; color:#fff; outline:none; line-height:1.4;" onkeydown="if(event.key==='Enter' && !event.shiftKey){ event.preventDefault(); addLeadComment('${id}'); }"></textarea>
+          <button class="chat-send-btn" onclick="addLeadComment('${id}')" style="background:var(--primary); color:#fff; border:none; width:26px; height:26px; border-radius:50%; display:flex; align-items:center; justify-content:center; cursor:pointer; transition:all 0.2s; padding:0; flex-shrink:0; font-size:11px;">
+            ✈️
+          </button>
+        </div>
+      </div>
 
-    <!-- History -->
-    <div class="middle-col-section">
-      <div class="section-subtitle">📜 История изменений</div>
-      <div class="history-list">${historyHtml}</div>
     </div>
   `;
+
+  // Auto-scroll timeline to top
+  const scroller = document.getElementById('lead-timeline-scroller');
+  if (scroller) scroller.scrollTop = 0;
 }
 
 // ─── Actions for Lead Tasks/Comments
@@ -1671,7 +1662,7 @@ async function addLeadComment(id) {
     date: dateStr,
     user: currentUser,
     type: 'comment_add',
-    details: `Добавлен комментарий: "${text.substring(0, 60)}${text.length > 60 ? '...' : ''}"`
+    details: text
   });
 
   const updates = {
@@ -1726,7 +1717,8 @@ async function addLeadTask(id) {
     date: dateStr,
     user: currentUser,
     type: 'task_create',
-    details: `Создана задача: "${text}" (срок: ${formatDate(dueDate)}${dueTime ? ' в ' + dueTime : ''})`
+    taskId: newTask.id,
+    details: text
   });
 
   const updates = {
@@ -3500,7 +3492,8 @@ async function confirmContactLater() {
         date: dateStr,
         user: currentUser,
         type: 'task_create',
-        details: `Создана задача при переносе на «Связаться позднее»: "${text}" (срок: ${formatDate(dueDate)}${dueTime ? ' в ' + dueTime : ''})`
+        taskId: newTask.id,
+        details: text
       });
 
       const stageField = getStageFieldName(lead.fields);
@@ -3527,7 +3520,8 @@ async function confirmContactLater() {
         date: dateStr,
         user: currentUser,
         type: 'task_create',
-        details: `Создана быстрая задача с карточки: "${text}" (срок: ${formatDate(dueDate)}${dueTime ? ' в ' + dueTime : ''})`
+        taskId: newTask.id,
+        details: text
       });
       updates['История'] = JSON.stringify(history);
       Object.assign(lead.fields, {
