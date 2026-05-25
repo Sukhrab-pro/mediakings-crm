@@ -1815,6 +1815,7 @@ window.syncGoogleCalendarEvent = syncGoogleCalendarEvent;
 
 // ─── Lead detail drawer
 async function openLeadDetail(id, stage) {
+  window._activeLeadId = id; // Запоминаем ID активного лида
   if (State.employees.length === 0) {
     State.employees = await Airtable.getAll(CONFIG.TABLES.EMPLOYEES);
   }
@@ -1859,6 +1860,7 @@ async function openLeadDetail(id, stage) {
         ${f['Дата консультации'] ? `<div style="color:#3b82f6; font-weight:600; font-size:13px;">📅 ${escHtml(f['Дата консультации'])} ${escHtml(f['Время консультации']||'')}</div>` : '<div style="color:#3b82f6; font-weight:600; font-size:13px;">📅 Консультация запланирована</div>'}
         <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; font-weight:600">
           <input type="checkbox" id="ei-consult-done" ${f['Консультация проведена']?'checked':''}
+            onchange="toggleConsultDone('${id}')"
             style="width:16px; height:16px; accent-color:#6366f1; cursor:pointer">
           <span style="color:${f['Консультация проведена']?'#34d399':'var(--text2)'}">
             ${f['Консультация проведена'] ? '✅ Проведена' : 'Проведена?'}
@@ -2114,12 +2116,40 @@ async function toggleConsultDone(id) {
   const newVal = !lead.fields['Консультация проведена'];
   lead.fields['Консультация проведена'] = newVal; // оптимистично
   renderKanban(State.leads);
+  renderLeadsStats(); // Сразу обновляем счетчики в шапке!
+  
+  // Если открыт детальный просмотр этого лида, обновим чекбокс в drawer в реальном времени
+  const drawer = document.getElementById('drawer-detail');
+  if (drawer && drawer.classList.contains('open') && window._activeLeadId === id) {
+    const cb = document.getElementById('ei-consult-done');
+    if (cb) {
+      cb.checked = newVal;
+      const labelSpan = cb.nextElementSibling;
+      if (labelSpan) {
+        labelSpan.style.color = newVal ? '#34d399' : 'var(--text2)';
+        labelSpan.textContent = newVal ? '✅ Проведена' : 'Проведена?';
+      }
+    }
+  }
+
   try {
     await Airtable.update(CONFIG.TABLES.LEADS, id, { 'Консультация проведена': newVal });
     toast(newVal ? '✅ Консультация проведена' : '☑️ Отметка снята');
   } catch(e) {
     lead.fields['Консультация проведена'] = !newVal; // откат
     renderKanban(State.leads);
+    renderLeadsStats();
+    if (drawer && drawer.classList.contains('open') && window._activeLeadId === id) {
+      const cb = document.getElementById('ei-consult-done');
+      if (cb) {
+        cb.checked = !newVal;
+        const labelSpan = cb.nextElementSibling;
+        if (labelSpan) {
+          labelSpan.style.color = (!newVal) ? '#34d399' : 'var(--text2)';
+          labelSpan.textContent = (!newVal) ? '✅ Проведена' : 'Проведена?';
+        }
+      }
+    }
     toast('Ошибка: ' + e.message, 'error');
   }
 }
