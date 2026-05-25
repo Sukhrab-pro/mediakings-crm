@@ -1049,6 +1049,50 @@ function initDragDrop() {
 
 // ─── Touch Drag (Mobile)
 function initTouchDrag() {
+  let autoScrollInterval = null;
+  let lastTouchX = 0;
+  let lastTouchY = 0;
+
+  function startAutoScroll() {
+    if (autoScrollInterval) return; // Already running
+    autoScrollInterval = setInterval(() => {
+      let scrolled = false;
+      const wrap = document.querySelector('.kanban-wrap');
+      
+      // Horizontal scroll (.kanban-wrap)
+      if (wrap) {
+        if (lastTouchX < 70) {
+          wrap.scrollLeft -= 12;
+          scrolled = true;
+        } else if (lastTouchX > window.innerWidth - 70) {
+          wrap.scrollLeft += 12;
+          scrolled = true;
+        }
+      }
+      
+      // Vertical scroll (page window)
+      if (lastTouchY < 100) {
+        window.scrollBy(0, -15);
+        scrolled = true;
+      } else if (lastTouchY > window.innerHeight - 100) {
+        window.scrollBy(0, 15);
+        scrolled = true;
+      }
+      
+      if (!scrolled) {
+        clearInterval(autoScrollInterval);
+        autoScrollInterval = null;
+      }
+    }, 50);
+  }
+
+  function stopAutoScroll() {
+    if (autoScrollInterval) {
+      clearInterval(autoScrollInterval);
+      autoScrollInterval = null;
+    }
+  }
+
   document.querySelectorAll('.kanban-card').forEach(card => {
     let timer = null, ghost = null;
     card.addEventListener('touchstart', e => {
@@ -1067,6 +1111,12 @@ function initTouchDrag() {
       const touch = e.touches[0], rect = card.getBoundingClientRect();
       ghost.style.left = (touch.clientX - rect.width/2) + 'px';
       ghost.style.top  = (touch.clientY - 40) + 'px';
+      
+      // Update coordinates and start auto-scrolling if near edges
+      lastTouchX = touch.clientX;
+      lastTouchY = touch.clientY;
+      startAutoScroll();
+
       ghost.style.display = 'none';
       const el = document.elementFromPoint(touch.clientX, touch.clientY);
       ghost.style.display = '';
@@ -1075,6 +1125,7 @@ function initTouchDrag() {
     }, { passive: false });
     const endDrag = e => {
       clearTimeout(timer);
+      stopAutoScroll();
       document.querySelectorAll('.kanban-col').forEach(c => c.classList.remove('drag-over'));
       if (!ghost) return;
       const touch = (e.changedTouches||e.touches)[0];
