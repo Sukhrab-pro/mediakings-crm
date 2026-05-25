@@ -18,6 +18,26 @@
 </head>
 <body>
 
+<!-- LOGIN OVERLAY -->
+<div id="login-overlay" class="login-overlay">
+  <div class="login-card">
+    <div class="login-logo">👑</div>
+    <h2>Вход в MK CRM</h2>
+    <div id="login-error" class="login-error" style="display:none;"></div>
+    <form id="login-form" onsubmit="event.preventDefault(); submitLogin();">
+      <div class="form-group">
+        <label class="form-label" for="login-email">Email</label>
+        <input type="email" id="login-email" class="form-input" placeholder="name@company.com" required autocomplete="username" style="height:48px !important;"/>
+      </div>
+      <div class="form-group" style="margin-bottom: 24px;">
+        <label class="form-label" for="login-password">Пароль</label>
+        <input type="password" id="login-password" class="form-input" placeholder="••••••••" required autocomplete="current-password" style="height:48px !important;"/>
+      </div>
+      <button type="submit" id="login-submit-btn" class="btn btn-primary" style="margin-top:4px; width:100%; height:48px;">Войти</button>
+    </form>
+  </div>
+</div>
+
 <!-- ── Mobile top bar (only on phones) ── -->
 <div id="mobile-topbar" class="mobile-topbar">
   <button class="mobile-back-btn" id="mobile-back-btn" onclick="mobileGoBack()">‹ Назад</button>
@@ -33,9 +53,14 @@
       ⚙️ Настройка
     </button>
   </div>
-  <button class="header-btn" id="btn-refresh-data" onclick="refreshCRMData()" title="Обновить данные" style="gap:6px; font-size:12px; padding:6px 12px;">
-    <span class="refresh-icon" style="display:inline-block;">🔄</span> Обновить
-  </button>
+  <div style="display:flex; gap:8px; align-items:center;">
+    <button class="header-btn" id="btn-refresh-data" onclick="refreshCRMData()" title="Обновить данные" style="gap:6px; font-size:12px; padding:6px 12px; height:34px;">
+      <span class="refresh-icon" style="display:inline-block;">🔄</span> Обновить
+    </button>
+    <button class="header-btn" id="btn-logout" onclick="logout()" title="Выйти" style="gap:4px; font-size:12px; padding:6px 12px; background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.25); color:#fca5a5; display:none; height:34px;">
+      🚪 Выйти
+    </button>
+  </div>
 </div>
 <div id="toast" class="toast"></div>
 
@@ -194,6 +219,23 @@
   </div>
 </div>
 
+<div id="page-calendar" class="page">
+  <div class="calendar-header-controls" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:10px;">
+    <div style="display:flex; align-items:center; gap:6px;">
+      <button class="btn btn-secondary btn-compact" onclick="prevMonth()" style="margin:0; width:auto; height:36px; padding:0 12px !important; display:inline-flex; align-items:center; justify-content:center;">←</button>
+      <button class="btn btn-secondary btn-compact" onclick="nextMonth()" style="margin:0; width:auto; height:36px; padding:0 12px !important; display:inline-flex; align-items:center; justify-content:center;">→</button>
+      <button class="btn btn-secondary btn-compact" onclick="goToday()" style="margin:0; width:auto; height:36px; padding:0 12px !important; font-weight:700; display:inline-flex; align-items:center; justify-content:center;">Сегодня</button>
+      <div id="calendar-title" style="font-size:18px; font-weight:800; margin-left:8px; min-width:140px; color:#fff;"></div>
+    </div>
+    <div style="display:flex; align-items:center; gap:8px;">
+      <select id="cal-flt-manager" onchange="onCalendarFilterChange()" class="form-select compact-input" style="width:160px; height:36px !important; margin:0; padding: 4px 28px 4px 10px !important;">
+        <option value="">Все менеджеры</option>
+      </select>
+    </div>
+  </div>
+  <div id="calendar-view-container"></div>
+</div>
+
 <div id="page-analytics" class="page">
   <div id="analytics-content"><div class="loading-state"><div class="spinner"></div></div></div>
 </div>
@@ -211,6 +253,7 @@
   <button class="nav-item" data-page="deals" onclick="navigate('deals')"><span class="icon">📁</span><span>Проекты</span></button>
   <button class="nav-item" data-page="operations" onclick="navigate('operations')"><span class="icon">📋</span><span>Операции</span></button>
   <button class="nav-item" data-page="finance" onclick="navigate('finance')"><span class="icon">💰</span><span>Финансы</span></button>
+  <button class="nav-item" data-page="calendar" onclick="navigate('calendar')"><span class="icon">📅</span><span>Календарь</span></button>
   <button class="nav-item" data-page="analytics" onclick="navigate('analytics')"><span class="icon">📊</span><span>Отчёты</span></button>
 </nav>
 

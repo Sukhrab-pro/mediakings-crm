@@ -1,4 +1,39 @@
 // === LEADS, CLIENTS, DEALS, OPERATIONS MODULE ===
+// Разбор даты и времени консультации лида
+function parseLeadConsultationDateTime(lead) {
+  if (!lead || !lead.fields) return null;
+  const dateStr = lead.fields['Дата консультации'];
+  const timeStr = lead.fields['Время консультации'];
+  if (!dateStr) return null;
+  
+  let parsedDate = null;
+  let m = String(dateStr).match(/(\d{2})\.(\d{2})\.(\d{4})/);
+  if (m) {
+    parsedDate = new Date(+m[3], +m[2]-1, +m[1]);
+  } else {
+    m = String(dateStr).match(/(\d{4})-(\d{2})-(\d{2})/);
+    if (m) {
+      parsedDate = new Date(+m[1], +m[2]-1, +m[3]);
+    } else {
+      const d = new Date(dateStr);
+      parsedDate = isNaN(d) ? null : d;
+    }
+  }
+  if (!parsedDate) return null;
+
+  if (timeStr) {
+    const tm = String(timeStr).match(/(\d{1,2}):(\d{2})/);
+    if (tm) {
+      parsedDate.setHours(parseInt(tm[1], 10), parseInt(tm[2], 10), 0, 0);
+    } else {
+      parsedDate.setHours(0, 0, 0, 0);
+    }
+  } else {
+    parsedDate.setHours(0, 0, 0, 0);
+  }
+  return parsedDate;
+}
+
 async function loadLeads() {
   if (State.leads.length > 0) {
     renderPipelineSelect();
@@ -170,8 +205,8 @@ function renderLeadsStats() {
            d.getDate() === now.getDate();
   });
   
-  const consultAppointed = consultAll.filter(l => getField(l.fields, CONFIG.LEAD_FIELDS.stage) === 'Консультация назначена').length;
-  const consultDone      = consultAll.filter(l => getField(l.fields, CONFIG.LEAD_FIELDS.stage) !== 'Консультация назначена').length;
+  const consultAppointed = consultAll.filter(l => !l.fields['Консультация проведена']).length;
+  const consultDone      = consultAll.filter(l => l.fields['Консультация проведена'] === true).length;
 
   // Продажи (по дате продажи, с фолбеком на дату создания для старых данных)
   const soldLeads = currentPipelineLeads.filter(l => getField(l.fields, CONFIG.LEAD_FIELDS.stage) === 'Продано');
@@ -820,14 +855,20 @@ function renderKanban(leads) {
       });
     } else if (sortType === 'consult-asc') {
       sortedItems.sort((a, b) => {
-        const dateA = parseDateStr(a.fields['Дата консультации']) || new Date(0);
-        const dateB = parseDateStr(b.fields['Дата консультации']) || new Date(0);
+        const dateA = parseLeadConsultationDateTime(a);
+        const dateB = parseLeadConsultationDateTime(b);
+        if (!dateA && !dateB) return 0;
+        if (!dateA) return 1;
+        if (!dateB) return -1;
         return dateA - dateB;
       });
     } else if (sortType === 'consult-desc') {
       sortedItems.sort((a, b) => {
-        const dateA = parseDateStr(a.fields['Дата консультации']) || new Date(0);
-        const dateB = parseDateStr(b.fields['Дата консультации']) || new Date(0);
+        const dateA = parseLeadConsultationDateTime(a);
+        const dateB = parseLeadConsultationDateTime(b);
+        if (!dateA && !dateB) return 0;
+        if (!dateA) return 1;
+        if (!dateB) return -1;
         return dateB - dateA;
       });
     } else if (sortType === 'created-asc') {
@@ -1374,7 +1415,7 @@ async function updateLeadStageOptimistic(id, newStage, oldStage, beforeId) {
   }
 }
 
-function updateLeadStage(id, newStage) {
+async function updateLeadStage(id, newStage) {
   const lead = State.leads.find(l => l.id === id);
   const stageField = lead ? getStageFieldName(lead.fields) : 'Воронка';
   const oldStage = lead?.fields[stageField] || '';
@@ -1382,6 +1423,16 @@ function updateLeadStage(id, newStage) {
     openNonTargetModal([id]);
     return;
   }
+  
+  const drawer = document.getElementById('drawer-detail');
+  if (drawer && drawer.classList.contains('open')) {
+    try {
+      await saveLeadEdit(id);
+    } catch(e) {
+      console.warn('Failed to save lead edit before stage change:', e.message);
+    }
+  }
+  
   closeDrawer('drawer-detail');
   updateLeadStageOptimistic(id, newStage, oldStage);
 }
@@ -1701,6 +1752,67 @@ window.addLeadComment = addLeadComment;
 window.addLeadTask = addLeadTask;
 window.toggleTaskDone = toggleTaskDone;
 
+// ─── Синхронизация с Google Календарем
+async function syncGoogleCalendarEvent(lead) {
+  if (!lead) return;
+  const id = lead.id;
+  const f = lead.fields;
+  const dateVal = f['Дата консультации'] || '';
+  const timeVal = f['Время консультации'] || '';
+  const eventId = f['Google_Event_ID'] || '';
+  
+  const leadName = getField(f, CONFIG.LEAD_FIELDS.name) || 'Лид';
+  const sourceName = getField(f, CONFIG.LEAD_FIELDS.source) || '';
+  const managerName = f['Менеджер'] || '';
+  const phone = getField(f, CONFIG.LEAD_FIELDS.phone) || '';
+  const comment = f['Комментарий'] || '';
+  
+  const title = `Консультация: ${leadName}`;
+  const desc = `Менеджер: ${managerName}\nИсточник: ${sourceName}\nТелефон: ${phone}\nКомментарий: ${comment}`;
+  
+  const hasDateAndTime = dateVal.trim() !== '' && timeVal.trim() !== '';
+  
+  if (hasDateAndTime) {
+    const action = eventId ? 'updateEvent' : 'createEvent';
+    toast('Синхронизация с Google Календарем...');
+    try {
+      let url = `${CONFIG.APPS_SCRIPT_URL}?key=${CONFIG.API_KEY}&action=${action}&title=${encodeURIComponent(title)}&date=${encodeURIComponent(dateVal)}&time=${encodeURIComponent(timeVal)}&desc=${encodeURIComponent(desc)}`;
+      if (eventId) {
+        url += `&eventId=${encodeURIComponent(eventId)}`;
+      }
+      
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      
+      if (data.success && data.eventId && data.eventId !== eventId) {
+        await Airtable.update(CONFIG.TABLES.LEADS, id, { 'Google_Event_ID': data.eventId });
+        lead.fields['Google_Event_ID'] = data.eventId;
+      }
+      toast('Синхронизация с Google Календарем успешна ✓');
+    } catch(e) {
+      console.error('Calendar sync error:', e);
+      toast('Не удалось синхронизировать Календарь: ' + e.message, 'error');
+    }
+  } else if (eventId) {
+    toast('Удаление события из Google Календаря...');
+    try {
+      const url = `${CONFIG.APPS_SCRIPT_URL}?key=${CONFIG.API_KEY}&action=deleteEvent&eventId=${encodeURIComponent(eventId)}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      
+      await Airtable.update(CONFIG.TABLES.LEADS, id, { 'Google_Event_ID': null });
+      lead.fields['Google_Event_ID'] = '';
+      toast('Событие удалено из Google Календаря ✓');
+    } catch(e) {
+      console.error('Calendar delete error:', e);
+      toast('Не удалось удалить из Google Календаря: ' + e.message, 'error');
+    }
+  }
+}
+window.syncGoogleCalendarEvent = syncGoogleCalendarEvent;
+
 // ─── Lead detail drawer
 async function openLeadDetail(id, stage) {
   if (State.employees.length === 0) {
@@ -1742,7 +1854,7 @@ async function openLeadDetail(id, stage) {
       </div>
     </div>
 
-    ${(f['Дата консультации'] || stage === 'Консультация назначена' || stage === 'КП на рассмотрении' || stage === 'Договор на рассмотрении') ? `
+    ${(f['Дата консультации'] || stage === 'Консультация назначена' || stage === 'КП на рассмотрении' || stage === 'Договор на рассмотрении' || f['Консультация проведена']) ? `
       <div class="card" style="margin-bottom:12px; border-color:#3b82f6; padding:10px 14px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
         ${f['Дата консультации'] ? `<div style="color:#3b82f6; font-weight:600; font-size:13px;">📅 ${escHtml(f['Дата консультации'])} ${escHtml(f['Время консультации']||'')}</div>` : '<div style="color:#3b82f6; font-weight:600; font-size:13px;">📅 Консультация запланирована</div>'}
         <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; font-weight:600">
@@ -1973,12 +2085,18 @@ async function saveLeadEdit(id) {
     renderLeadsStats();
     renderLeadMiddleColumn(lead);
     toast('Изменения сохранены ✓');
+    syncGoogleCalendarEvent(lead).catch(console.error);
   } catch(e) { toast('Ошибка: ' + e.message, 'error'); }
 }
 
 // ─── Удалить лид
 async function deleteLead(id) {
   if (!confirm('Удалить заявку? Это действие нельзя отменить.')) return;
+  const lead = State.leads.find(l => l.id === id);
+  const eventId = lead?.fields['Google_Event_ID'];
+  if (eventId) {
+    fetch(`${CONFIG.APPS_SCRIPT_URL}?key=${CONFIG.API_KEY}&action=deleteEvent&eventId=${encodeURIComponent(eventId)}`).catch(console.error);
+  }
   try {
     await Airtable.remove(CONFIG.TABLES.LEADS, id);
     State.leads = State.leads.filter(l => l.id !== id);
@@ -3247,6 +3365,18 @@ function updateAuditButtonState() {
 function populateLeadsFilterOptions() {
   const select = document.getElementById('flt-manager');
   if (!select) return;
+
+  const perms = State.permissions;
+  const currentUser = State.currentUser;
+
+  if (perms && perms['Только свои Лиды'] && currentUser) {
+    State.filterManager = currentUser.name;
+    select.innerHTML = `<option value="${escHtml(currentUser.name)}" selected>${escHtml(currentUser.name)}</option>`;
+    select.disabled = true;
+    return;
+  }
+
+  select.disabled = false;
   const currentVal = select.value;
   select.innerHTML = '<option value="">Все менеджеры</option>' + 
     State.employees.map(e => {
@@ -3297,12 +3427,20 @@ function clearLeadsFilters() {
   const clearBtn = document.getElementById('flt-clear-btn');
 
   State.filterSearch = '';
-  State.filterManager = '';
   State.filterDateType = '';
   State.filterDate = '';
 
+  const perms = State.permissions;
+  const currentUser = State.currentUser;
+  
+  if (perms && perms['Только свои Лиды'] && currentUser) {
+    State.filterManager = currentUser.name;
+  } else {
+    State.filterManager = '';
+    if (mgrSelect) mgrSelect.value = '';
+  }
+
   if (searchInput) searchInput.value = '';
-  if (mgrSelect) mgrSelect.value = '';
   if (dateTypeSelect) dateTypeSelect.value = '';
   if (dateInput) {
     dateInput.value = '';
@@ -3313,4 +3451,334 @@ function clearLeadsFilters() {
   renderLeadsStats();
   renderKanban(State.leads);
 }
+
+// ════════════════════════════
+// ВНУТРЕННИЙ CRM КАЛЕНДАРЬ
+// ════════════════════════════
+const CalState = {
+  currentYear: new Date().getFullYear(),
+  currentMonth: new Date().getMonth(),
+  selectedDate: new Date().toISOString().substring(0, 10),
+  filterManager: ''
+};
+
+async function loadCalendarPage() {
+  const container = document.getElementById('calendar-view-container');
+  if (!container) return;
+  
+  spinner('calendar-view-container');
+  
+  // Загружаем лиды и сотрудников, если еще не загружены
+  if (State.leads.length === 0) {
+    try {
+      const [leads, employees] = await Promise.all([
+        Airtable.getAll(CONFIG.TABLES.LEADS),
+        Airtable.getAll(CONFIG.TABLES.EMPLOYEES)
+      ]);
+      State.leads = leads;
+      State.employees = employees;
+    } catch(e) {
+      container.innerHTML = `<div class="empty">⚠️ Ошибка загрузки данных: ${escHtml(e.message)}</div>`;
+      return;
+    }
+  }
+
+  // Применяем принудительный фильтр «Только свои Лиды»
+  const perms = State.permissions;
+  const currentUser = State.currentUser;
+  const filterSelect = document.getElementById('cal-flt-manager');
+
+  if (perms && perms['Только свои Лиды'] && currentUser) {
+    CalState.filterManager = currentUser.name;
+    if (filterSelect) {
+      filterSelect.innerHTML = `<option value="${escHtml(currentUser.name)}" selected>${escHtml(currentUser.name)}</option>`;
+      filterSelect.disabled = true;
+    }
+  } else {
+    if (filterSelect) {
+      filterSelect.disabled = false;
+      const currentVal = CalState.filterManager;
+      filterSelect.innerHTML = '<option value="">Все менеджеры</option>' +
+        State.employees.map(e => {
+          const name = e.fields['Имя'] || '';
+          return `<option value="${escHtml(name)}"${currentVal === name ? ' selected' : ''}>${escHtml(name)}</option>`;
+        }).join('');
+    }
+  }
+
+  renderCalendar();
+}
+
+function renderCalendar() {
+  const container = document.getElementById('calendar-view-container');
+  const titleEl = document.getElementById('calendar-title');
+  if (!container) return;
+
+  // Обновляем заголовок с названием месяца
+  const monthNames = [
+    'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
+    'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'
+  ];
+  if (titleEl) {
+    titleEl.textContent = `${monthNames[CalState.currentMonth]} ${CalState.currentYear}`;
+  }
+
+  const isMobile = window.innerWidth < 768;
+
+  if (isMobile) {
+    renderMobileCalendar(container);
+  } else {
+    renderDesktopCalendar(container);
+  }
+}
+
+function renderDesktopCalendar(container) {
+  const year = CalState.currentYear;
+  const month = CalState.currentMonth;
+
+  // Первый день недели в месяце (0 - воскресенье, 1 - понедельник и т.д.)
+  const firstDay = new Date(year, month, 1).getDay();
+  // Сдвиг для Пн=0, Вт=1 ... Вс=6
+  const startDay = firstDay === 0 ? 6 : firstDay - 1;
+  // Кол-во дней в текущем месяце
+  const totalDays = new Date(year, month + 1, 0).getDate();
+  // Кол-во дней в предыдущем месяце
+  const prevTotalDays = new Date(year, month, 0).getDate();
+
+  let html = `
+    <div class="calendar-grid">
+      <div class="calendar-day-header">Пн</div>
+      <div class="calendar-day-header">Вт</div>
+      <div class="calendar-day-header">Ср</div>
+      <div class="calendar-day-header">Чт</div>
+      <div class="calendar-day-header">Пт</div>
+      <div class="calendar-day-header">Сб</div>
+      <div class="calendar-day-header">Вс</div>
+  `;
+
+  // Предыдущий месяц (серые ячейки)
+  for (let i = startDay - 1; i >= 0; i--) {
+    const dNum = prevTotalDays - i;
+    const prevMonth = month === 0 ? 11 : month - 1;
+    const prevYear = month === 0 ? year - 1 : year;
+    html += renderDayCell(prevYear, prevMonth, dNum, true);
+  }
+
+  // Текущий месяц
+  for (let dNum = 1; dNum <= totalDays; dNum++) {
+    html += renderDayCell(year, month, dNum, false);
+  }
+
+  // Следующий месяц (серые ячейки)
+  const totalCells = startDay + totalDays;
+  const remainingCells = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
+  for (let i = 1; i <= remainingCells; i++) {
+    const nextMonth = month === 11 ? 0 : month + 1;
+    const nextYear = month === 11 ? year + 1 : year;
+    html += renderDayCell(nextYear, nextMonth, i, true);
+  }
+
+  html += `</div>`;
+  container.innerHTML = html;
+}
+
+function renderDayCell(y, m, dNum, isOtherMonth) {
+  const cellDate = new Date(y, m, dNum);
+  const cellDateStr = `${String(dNum).padStart(2,'0')}.${String(m+1).padStart(2,'0')}.${y}`;
+  const isoDateStr = `${y}-${String(m+1).padStart(2,'0')}-${String(dNum).padStart(2,'0')}`;
+  
+  const today = new Date();
+  const isToday = today.getDate() === dNum && today.getMonth() === m && today.getFullYear() === y;
+
+  // Фильтруем лиды по дате
+  let cellLeads = State.leads.filter(l => {
+    const cDate = l.fields['Дата консультации'];
+    if (!cDate) return false;
+    // Сравниваем нормализованную дату
+    return toInputDateFormat(cDate) === isoDateStr;
+  });
+
+  if (CalState.filterManager) {
+    cellLeads = cellLeads.filter(l => l.fields['Менеджер'] === CalState.filterManager);
+  }
+
+  // Сортировка по времени
+  cellLeads.sort((a,b) => String(a.fields['Время консультации'] || '').localeCompare(String(b.fields['Время консультации'] || '')));
+
+  let eventsHtml = '';
+  cellLeads.forEach(l => {
+    const time = l.fields['Время консультации'] || '—';
+    const name = getField(l.fields, CONFIG.LEAD_FIELDS.name) || 'Лид';
+    const mgr = l.fields['Менеджер'] || '';
+    const color = getManagerColor(mgr);
+    const stage = l.fields['Воронка'] || 'Лид';
+    eventsHtml += `
+      <div class="calendar-event-badge" style="--mgr-color: ${color}" onclick="event.stopPropagation(); openLeadDetail('${l.id}', '${escHtml(stage)}')" title="${escHtml(name)} (${time}) - ${escHtml(mgr)}">
+        <span style="font-weight:800">${escHtml(time)}</span> ${escHtml(name)}
+      </div>
+    `;
+  });
+
+  const cellClass = `calendar-day-cell ${isOtherMonth ? 'other-month' : ''} ${isToday ? 'today' : ''}`;
+  return `
+    <div class="${cellClass}" onclick="goMobileDay('${isoDateStr}')">
+      <div class="calendar-day-num">${dNum}</div>
+      <div class="calendar-events-container">${eventsHtml}</div>
+    </div>
+  `;
+}
+
+function renderMobileCalendar(container) {
+  const selectedDateObj = new Date(CalState.selectedDate);
+  
+  // Генерируем 14 дней (3 дня назад, 10 дней вперед)
+  let timelineHtml = '<div class="mobile-week-timeline">';
+  
+  for (let i = -3; i < 11; i++) {
+    const cellDate = new Date();
+    cellDate.setDate(new Date().getDate() + i);
+    
+    const isoDateStr = `${cellDate.getFullYear()}-${String(cellDate.getMonth()+1).padStart(2,'0')}-${String(cellDate.getDate()).padStart(2,'0')}`;
+    const dNum = cellDate.getDate();
+    const weekNames = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
+    const wName = weekNames[cellDate.getDay()];
+    
+    const isActive = CalState.selectedDate === isoDateStr;
+    const isToday = new Date().toDateString() === cellDate.toDateString();
+
+    // Проверяем наличие событий
+    let dayLeads = State.leads.filter(l => {
+      const cDate = l.fields['Дата консультации'];
+      return cDate && toInputDateFormat(cDate) === isoDateStr;
+    });
+    if (CalState.filterManager) {
+      dayLeads = dayLeads.filter(l => l.fields['Менеджер'] === CalState.filterManager);
+    }
+    const hasEvents = dayLeads.length > 0;
+
+    const dayClass = `mobile-week-day ${isActive ? 'active' : ''} ${isToday ? 'today' : ''} ${hasEvents ? 'has-events' : ''}`;
+    timelineHtml += `
+      <div class="${dayClass}" onclick="selectMobileDate('${isoDateStr}')">
+        <span class="mobile-week-day-name">${wName}</span>
+        <span class="mobile-week-day-num">${dNum}</span>
+      </div>
+    `;
+  }
+  timelineHtml += '</div>';
+
+  // Рендерим список событий на выбранный день
+  let eventsHtml = '<div class="mobile-event-list">';
+  
+  let dayLeads = State.leads.filter(l => {
+    const cDate = l.fields['Дата консультации'];
+    return cDate && toInputDateFormat(cDate) === CalState.selectedDate;
+  });
+  if (CalState.filterManager) {
+    dayLeads = dayLeads.filter(l => l.fields['Менеджер'] === CalState.filterManager);
+  }
+  
+  dayLeads.sort((a,b) => String(a.fields['Время консультации'] || '').localeCompare(String(b.fields['Время консультации'] || '')));
+
+  if (dayLeads.length === 0) {
+    eventsHtml += `
+      <div class="mobile-event-empty">
+        <div style="font-size:32px; margin-bottom:8px;">📅</div>
+        Нет назначенных консультаций на этот день
+      </div>
+    `;
+  } else {
+    dayLeads.forEach(l => {
+      const time = l.fields['Время консультации'] || '—';
+      const name = getField(l.fields, CONFIG.LEAD_FIELDS.name) || 'Лид';
+      const mgr = l.fields['Менеджер'] || 'не назначен';
+      const color = getManagerColor(mgr);
+      const source = getField(l.fields, CONFIG.LEAD_FIELDS.source) || '—';
+      const stage = l.fields['Воронка'] || 'Лид';
+      
+      eventsHtml += `
+        <div class="mobile-event-card" onclick="openLeadDetail('${l.id}', '${escHtml(stage)}')">
+          <div class="mobile-event-time">${escHtml(time)}</div>
+          <div class="mobile-event-details">
+            <div class="mobile-event-name">${escHtml(name)}</div>
+            <div class="mobile-event-meta">
+              <span class="mobile-event-manager-dot" style="--mgr-color: ${color}"></span>
+              <span>${escHtml(mgr)}</span>
+              <span>•</span>
+              <span>Источник: ${escHtml(source)}</span>
+            </div>
+          </div>
+        </div>
+      `;
+    });
+  }
+  eventsHtml += '</div>';
+
+  container.innerHTML = timelineHtml + eventsHtml;
+}
+
+function selectMobileDate(dateStr) {
+  CalState.selectedDate = dateStr;
+  renderCalendar();
+}
+
+function goMobileDay(dateStr) {
+  CalState.selectedDate = dateStr;
+  CalState.currentYear = new Date(dateStr).getFullYear();
+  CalState.currentMonth = new Date(dateStr).getMonth();
+  renderCalendar();
+}
+
+function prevMonth() {
+  if (CalState.currentMonth === 0) {
+    CalState.currentMonth = 11;
+    CalState.currentYear--;
+  } else {
+    CalState.currentMonth--;
+  }
+  renderCalendar();
+}
+
+function nextMonth() {
+  if (CalState.currentMonth === 11) {
+    CalState.currentMonth = 0;
+    CalState.currentYear++;
+  } else {
+    CalState.currentMonth++;
+  }
+  renderCalendar();
+}
+
+function goToday() {
+  const today = new Date();
+  CalState.currentYear = today.getFullYear();
+  CalState.currentMonth = today.getMonth();
+  CalState.selectedDate = today.toISOString().substring(0, 10);
+  renderCalendar();
+}
+
+function onCalendarFilterChange() {
+  const select = document.getElementById('cal-flt-manager');
+  if (select) {
+    CalState.filterManager = select.value;
+    renderCalendar();
+  }
+}
+
+// Слушатель изменения размеров экрана для адаптивного рендеринга
+window.addEventListener('resize', () => {
+  if (State.currentPage === 'calendar') {
+    renderCalendar();
+  }
+});
+
+// Экспортируем функции в window
+window.loadCalendarPage = loadCalendarPage;
+window.renderCalendar = renderCalendar;
+window.prevMonth = prevMonth;
+window.nextMonth = nextMonth;
+window.goToday = goToday;
+window.onCalendarFilterChange = onCalendarFilterChange;
+window.selectMobileDate = selectMobileDate;
+window.goMobileDay = goMobileDay;
+
 

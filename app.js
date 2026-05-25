@@ -167,6 +167,7 @@ async function loadPage(page) {
   if (page === 'deals')      await loadDeals();
   if (page === 'operations') await loadOperations();
   if (page === 'finance')    await loadFinance();
+  if (page === 'calendar')   await loadCalendarPage();
   if (page === 'analytics')  await loadAnalytics();
 }
 
@@ -189,7 +190,7 @@ function spinner(id) {
 // ─── Mobile top bar helpers
 const _MOBILE_PAGE_TITLES = {
   leads: '🎯 Лиды', clients: '👥 Клиенты', deals: '📁 Проекты',
-  operations: '📋 Операции', finance: '💰 Финансы', analytics: '📊 Отчёты'
+  operations: '📋 Операции', finance: '💰 Финансы', calendar: '📅 Календарь', analytics: '📊 Отчёты'
 };
 
 function updateMobileBar() {
@@ -282,6 +283,165 @@ if ('serviceWorker' in navigator) {
     }
   });
 }
-navigate('leads');
+
+// ════════════════════════════
+// СИСТЕМА АВТОРИЗАЦИИ И ПРАВ
+// ════════════════════════════
+async function initApp() {
+  const user = JSON.parse(localStorage.getItem('crm_user') || 'null');
+  if (!user) {
+    document.getElementById('login-overlay').style.display = 'flex';
+    document.getElementById('btn-logout').style.display = 'none';
+  } else {
+    // 1. Попытка получить актуальную роль сотрудника напрямую из БД на случай изменений прав
+    let activeRole = user.role;
+    try {
+      if (user.email) {
+        const employee = await Airtable.findEmployeeByEmail(user.email);
+        if (employee) {
+          const dbRole = String(employee.fields['Роль'] || '').trim();
+          if (dbRole && dbRole !== user.role) {
+            user.role = dbRole;
+            localStorage.setItem('crm_user', JSON.stringify(user));
+            activeRole = dbRole;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Не удалось обновить роль пользователя с сервера, используем локальный кэш:', e.message);
+    }
+
+    const perms = await Airtable.getRolePermissions(activeRole);
+    if (!perms) {
+      localStorage.removeItem('crm_user');
+      localStorage.removeItem('crm_current_user');
+      document.getElementById('login-overlay').style.display = 'flex';
+      document.getElementById('btn-logout').style.display = 'none';
+      const errorEl = document.getElementById('login-error');
+      if (errorEl) {
+        errorEl.textContent = `Доступ запрещен: роль "${activeRole}" не найдена в таблице "Права доступа". Обратитесь к администратору.`;
+        errorEl.style.display = 'block';
+      }
+      return;
+    }
+    
+    document.getElementById('login-overlay').style.display = 'none';
+    document.getElementById('btn-logout').style.display = 'inline-flex';
+    
+    State.currentUser = user;
+    State.permissions = perms;
+    
+    applyPermissionsUI();
+    
+    // Переход на доступную страницу по умолчанию
+    let defaultPage = 'leads';
+    if (!perms['Доступ: Лиды']) {
+      if (perms['Доступ: Клиенты']) defaultPage = 'clients';
+      else if (perms['Доступ: Проекты']) defaultPage = 'deals';
+      else if (perms['Доступ: Операции']) defaultPage = 'operations';
+      else if (perms['Доступ: Финансы']) defaultPage = 'finance';
+      else if (perms['Доступ: Календарь']) defaultPage = 'calendar';
+      else if (perms['Доступ: Отчеты']) defaultPage = 'analytics';
+    }
+    
+    navigate(defaultPage);
+  }
+}
+
+function applyPermissionsUI() {
+  const perms = State.permissions;
+  if (!perms) return;
+
+  const navItems = document.querySelectorAll('.bottom-nav .nav-item');
+  navItems.forEach(btn => {
+    const page = btn.getAttribute('data-page');
+    let hasAccess = true;
+    if (page === 'leads' && !perms['Доступ: Лиды']) hasAccess = false;
+    if (page === 'clients' && !perms['Доступ: Клиенты']) hasAccess = false;
+    if (page === 'deals' && !perms['Доступ: Проекты']) hasAccess = false;
+    if (page === 'operations' && !perms['Доступ: Операции']) hasAccess = false;
+    if (page === 'finance' && !perms['Доступ: Финансы']) hasAccess = false;
+    if (page === 'calendar' && !perms['Доступ: Календарь']) hasAccess = false;
+    if (page === 'analytics' && !perms['Доступ: Отчеты']) hasAccess = false;
+    
+    btn.style.display = hasAccess ? 'flex' : 'none';
+  });
+
+  const settingsBtns = document.querySelectorAll('[onclick="openPipelineSettings()"]');
+  settingsBtns.forEach(btn => {
+    btn.style.display = perms['Доступ: Настройки'] ? 'inline-flex' : 'none';
+  });
+}
+
+async function submitLogin() {
+  const emailEl = document.getElementById('login-email');
+  const passwordEl = document.getElementById('login-password');
+  const errorEl = document.getElementById('login-error');
+  const submitBtn = document.getElementById('login-submit-btn');
+
+  const email = emailEl.value.trim();
+  const password = passwordEl.value.trim();
+  errorEl.style.display = 'none';
+
+  submitBtn.disabled = true;
+  submitBtn.innerHTML = `<span class="spinner"></span> Вход...`;
+
+  try {
+    const employee = await Airtable.findEmployeeByEmail(email);
+    if (!employee) {
+      throw new Error('Пользователь с таким Email не найден');
+    }
+    
+    const dbPassword = String(employee.fields['Пароль'] || '').trim();
+    if (!dbPassword || dbPassword !== password) {
+      throw new Error('Неверный пароль');
+    }
+
+    const role = String(employee.fields['Роль'] || '').trim();
+    if (!role) {
+      throw new Error('Вам не назначена роль (Права доступа) в системе. Обратитесь к администратору.');
+    }
+
+    const perms = await Airtable.getRolePermissions(role);
+    if (!perms) {
+      throw new Error(`Роль "${role}" не найдена в таблице "Права доступа". Обратитесь к администратору.`);
+    }
+
+    const crmUser = {
+      id: employee.id,
+      name: employee.fields['Имя'],
+      email: employee.fields['Email'],
+      role: role
+    };
+
+    localStorage.setItem('crm_user', JSON.stringify(crmUser));
+    localStorage.setItem('crm_current_user', crmUser.name);
+
+    emailEl.value = '';
+    passwordEl.value = '';
+
+    await initApp();
+    toast('Вход выполнен успешно ✓');
+  } catch (e) {
+    errorEl.textContent = e.message;
+    errorEl.style.display = 'block';
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.innerHTML = 'Войти';
+  }
+}
+
+function logout() {
+  if (!confirm('Вы действительно хотите выйти из системы?')) return;
+  localStorage.removeItem('crm_user');
+  localStorage.removeItem('crm_current_user');
+  location.reload();
+}
+
+window.submitLogin = submitLogin;
+window.logout = logout;
+window.initApp = initApp;
+
+initApp();
 
 

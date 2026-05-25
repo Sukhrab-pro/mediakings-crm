@@ -143,6 +143,7 @@ const FIELD_MAPS = {
         'Задачи':'Задачи',
         'История':'История',
         'Комментарии_Лог':'Комментарии_Лог',
+        'Google_Event_ID':'Google_Event_ID',
       };
     },
     get [CONFIG.TABLES.CLIENTS]() {
@@ -194,7 +195,28 @@ const FIELD_MAPS = {
     },
     get [CONFIG.TABLES.EMPLOYEES]() {
       return {
-        'Имя':'Имя'
+        'Имя':'Имя',
+        'Email':'Email',
+        'Пароль':'Пароль',
+        'Права доступа':'Роль',
+        'Должность':'Должность',
+        'Активный':'Активный',
+        'Телефон':'Телефон'
+      };
+    },
+    get [CONFIG.TABLES.PERMISSIONS]() {
+      return {
+        'Роль':'Роль',
+        'Доступ: Лиды':'Доступ: Лиды',
+        'Редактирование: Лиды':'Редактирование: Лиды',
+        'Только свои Лиды':'Только свои Лиды',
+        'Доступ: Клиенты':'Доступ: Клиенты',
+        'Доступ: Проекты':'Доступ: Проекты',
+        'Доступ: Операции':'Доступ: Операции',
+        'Доступ: Финансы':'Доступ: Финансы',
+        'Доступ: Отчеты':'Доступ: Отчеты',
+        'Доступ: Настройки':'Доступ: Настройки',
+        'Доступ: Календарь':'Доступ: Календарь'
       };
     },
     get [CONFIG.TABLES.TARIFFS]() {
@@ -255,6 +277,7 @@ const FIELD_MAPS = {
         'Задачи':'Задачи',
         'История':'История',
         'Комментарии_Лог':'Комментарии_Лог',
+        'Google_Event_ID':'Google_Event_ID',
       };
     },
     get [CONFIG.TABLES.CLIENTS]() {
@@ -293,7 +316,28 @@ const FIELD_MAPS = {
     },
     get [CONFIG.TABLES.EMPLOYEES]() {
       return {
-        'Имя':'Имя'
+        'Имя':'Имя',
+        'Email':'Email',
+        'Пароль':'Пароль',
+        'Роль':'Права доступа',
+        'Должность':'Должность',
+        'Активный':'Активный',
+        'Телефон':'Телефон'
+      };
+    },
+    get [CONFIG.TABLES.PERMISSIONS]() {
+      return {
+        'Роль':'Роль',
+        'Доступ: Лиды':'Доступ: Лиды',
+        'Редактирование: Лиды':'Редактирование: Лиды',
+        'Только свои Лиды':'Только свои Лиды',
+        'Доступ: Клиенты':'Доступ: Клиенты',
+        'Доступ: Проекты':'Доступ: Проекты',
+        'Доступ: Операции':'Доступ: Операции',
+        'Доступ: Финансы':'Доступ: Финансы',
+        'Доступ: Отчеты':'Доступ: Отчеты',
+        'Доступ: Настройки':'Доступ: Настройки',
+        'Доступ: Календарь':'Доступ: Календарь'
       };
     },
     get [CONFIG.TABLES.TARIFFS]() {
@@ -400,7 +444,7 @@ function denormalizeFields(fields, tableId) {
     // Fields that can be explicitly set to null (e.g. to clear a single_select)
     const nullableFields = [
       'Причина: Не целевой', 'Бюджет', 'Ссылка на запись', 'Оплата', 'Instagram',
-      'Задачи', 'История', 'Комментарии_Лог',
+      'Задачи', 'История', 'Комментарии_Лог', 'Google_Event_ID',
       // Project fields
       'Стоимость заказа', 'Оплачено',
       'Дата начала', 'Сроки заказа План', 'Сроки заказа Факт', 'Дата завершения',
@@ -413,7 +457,7 @@ function denormalizeFields(fields, tableId) {
 
     // 3. Форматирование связей (link_row) в массив целых чисел
     const boolFields = ['Консультация проведена'];
-    const isLinkRow = !boolFields.includes(brKey) && (k.endsWith(' ID') || ['Company', 'Contact', 'Deals', 'Activities', 'Deal', 'Employee', 'Исполнитель', 'Тариф', 'Сотрудник', 'Менеджер', 'Этап', 'Воронка'].includes(brKey));
+    const isLinkRow = !boolFields.includes(brKey) && (k.endsWith(' ID') || ['Company', 'Contact', 'Deals', 'Activities', 'Deal', 'Employee', 'Исполнитель', 'Тариф', 'Сотрудник', 'Менеджер', 'Этап', 'Воронка', 'Права доступа'].includes(brKey));
 
     if (isLinkRow) {
       if (Array.isArray(v)) {
@@ -560,6 +604,27 @@ const Baserow = {
   // Получить все рабочие пространства (только JWT)
   async getWorkspaces() {
     return Baserow.req('GET', '/workspaces/');
+  },
+
+  // Найти сотрудника по Email
+  async findEmployeeByEmail(email) {
+    const emps = await Baserow.getAll(CONFIG.TABLES.EMPLOYEES);
+    const cleanEmail = String(email || '').trim().toLowerCase();
+    return emps.find(e => String(e.fields['Email'] || '').trim().toLowerCase() === cleanEmail) || null;
+  },
+
+  // Получить права для роли
+  async getRolePermissions(roleName) {
+    if (!roleName) return null;
+    try {
+      const perms = await Baserow.getAll(CONFIG.TABLES.PERMISSIONS);
+      const cleanRole = String(roleName || '').trim().toLowerCase();
+      const found = perms.find(p => String(p.fields['Роль'] || '').trim().toLowerCase() === cleanRole);
+      if (found) return found.fields;
+    } catch(e) {
+      console.warn('Failed to fetch role permissions from Baserow:', e.message);
+    }
+    return null;
   },
 };
 
