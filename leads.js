@@ -197,16 +197,17 @@ function renderLeadsStats() {
   }).length;
 
   // Консультации сегодня: по дате консультации (совпадающей с сегодняшней датой)
-  const consultAll = activePipelineLeads.filter(l => {
-    const d = parseDateStr(l.fields['Дата консультации']);
-    if (!d) return false;
-    return d.getFullYear() === now.getFullYear() &&
-           d.getMonth() === now.getMonth() &&
-           d.getDate() === now.getDate();
-  });
-  
-  const consultAppointed = consultAll.filter(l => !l.fields['Консультация проведена']).length;
-  const consultDone      = consultAll.filter(l => l.fields['Консультация проведена'] === true).length;
+  const todayStr = getLocalDateString();
+
+  const consultAppointed = activePipelineLeads.filter(l => {
+    const s = getField(l.fields, CONFIG.LEAD_FIELDS.stage);
+    if (s !== 'Консультация назначена') return false;
+    return isSameDay(l.fields['Дата консультации'], todayStr) && !l.fields['Консультация проведена'];
+  }).length;
+
+  const consultDone = activePipelineLeads.filter(l => {
+    return isSameDay(l.fields['Дата консультации'], todayStr) && l.fields['Консультация проведена'] === true;
+  }).length;
 
   // Продажи (по дате продажи, с фолбеком на дату создания для старых данных)
   const soldLeads = currentPipelineLeads.filter(l => getField(l.fields, CONFIG.LEAD_FIELDS.stage) === 'Продано');

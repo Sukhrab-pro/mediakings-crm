@@ -2718,6 +2718,108 @@ html, body {
   color: #93c5fd;
 }
 
+/* ─── Ежедневный отчет в аналитике ─── */
+.an-daily-table-container {
+  width: 100%;
+  overflow-x: auto;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(30, 41, 59, 0.3);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  margin-top: 16px;
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+}
+
+.an-daily-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 13px;
+  color: var(--text1);
+}
+
+.an-daily-table th {
+  background: rgba(15, 23, 42, 0.6);
+  color: #fff;
+  font-weight: 700;
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.an-daily-table td {
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.an-daily-table tbody tr {
+  transition: background-color 0.15s ease;
+}
+
+.an-daily-table tbody tr:hover {
+  background-color: rgba(255, 255, 255, 0.02);
+}
+
+/* Выходные дни */
+.an-daily-table tr.weekend-row {
+  background: rgba(239, 68, 68, 0.02);
+}
+
+.an-daily-table tr.weekend-row .date-cell {
+  color: #f87171;
+  font-weight: 600;
+}
+
+/* Недельные итоги */
+.an-daily-table tr.an-daily-week-total {
+  background: rgba(99, 102, 241, 0.1);
+  border-top: 1.5px solid rgba(99, 102, 241, 0.25);
+  border-bottom: 1.5px solid rgba(99, 102, 241, 0.25);
+}
+
+.an-daily-table tr.an-daily-week-total td {
+  font-weight: 700;
+  color: #a5b4fc;
+}
+
+/* Месячные итоги */
+.an-daily-table tr.an-daily-month-total {
+  background: rgba(52, 211, 153, 0.12);
+  border-top: 2px solid rgba(52, 211, 153, 0.35);
+  border-bottom: 2px solid rgba(52, 211, 153, 0.35);
+  font-size: 14px;
+}
+
+.an-daily-table tr.an-daily-month-total td {
+  font-weight: 800;
+  color: #34d399;
+  padding: 16px;
+}
+
+/* Особая подсветка для финансовых колонок */
+.an-daily-table .revenue-cell {
+  color: #34d399;
+  font-weight: 600;
+}
+
+.an-daily-table .cash-cell {
+  color: #60a5fa;
+  font-weight: 600;
+}
+
+.an-daily-table tr.an-daily-week-total .revenue-cell,
+.an-daily-table tr.an-daily-month-total .revenue-cell {
+  color: #34d399;
+}
+
+.an-daily-table tr.an-daily-week-total .cash-cell,
+.an-daily-table tr.an-daily-month-total .cash-cell {
+  color: #60a5fa;
+}
+
 
 
 

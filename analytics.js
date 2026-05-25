@@ -2,13 +2,14 @@
 async function loadAnalytics() {
   spinner('analytics-content');
   try {
-    const [leads, deals, tariffs, services] = await Promise.all([
+    const [leads, deals, tariffs, services, employees] = await Promise.all([
       Airtable.getAll(CONFIG.TABLES.LEADS),
       Airtable.getAll(CONFIG.TABLES.DEALS),
       Airtable.getAll(CONFIG.TABLES.TARIFFS),
       Airtable.getAll(CONFIG.TABLES.SERVICES),
+      Airtable.getAll(CONFIG.TABLES.EMPLOYEES),
     ]);
-    State.leads = leads; State.deals = deals; State.tariffs = tariffs; State.services = services;
+    State.leads = leads; State.deals = deals; State.tariffs = tariffs; State.services = services; State.employees = employees;
     renderAnalytics();
   } catch(e) {
     document.getElementById('analytics-content').innerHTML =
@@ -16,15 +17,7 @@ async function loadAnalytics() {
   }
 }
 
-// ─── Разбор строки даты (поддерживает DD.MM.YYYY и YYYY-MM-DD)
-function parseDateStr(str) {
-  if (!str) return null;
-  let m = String(str).match(/(\d{2})\.(\d{2})\.(\d{4})/);
-  if (m) return new Date(+m[3], +m[2]-1, +m[1]);
-  m = String(str).match(/(\d{4})-(\d{2})-(\d{2})/);
-  if (m) return new Date(+m[1], +m[2]-1, +m[3]);
-  const d = new Date(str); return isNaN(d) ? null : d;
-}
+// parseDateStr удалена, используется глобальная версия из config.js
 
 // ─── Разбор даты лида
 function parseLeadDate(lead) {
@@ -162,6 +155,7 @@ function renderAnalytics() {
   const tabs = [
     {key:'funnel',   label:'📊 Воронка'},
     {key:'managers', label:'👤 Менеджеры'},
+    {key:'daily',    label:'📅 Ежедневный отчет'},
     {key:'refunds',  label:'↩️ Возвраты'},
     {key:'economics', label:'💰 Юнит-экономика'},
   ];
@@ -169,29 +163,64 @@ function renderAnalytics() {
     `<button class="an-tab ${AnState.tab===t.key?'active':''}" onclick="anSetTab('${t.key}')">${t.label}</button>`
   ).join('');
 
-  document.getElementById('analytics-content').innerHTML = `
-    <div class="an-filters-container">
-      <div class="an-filters-row">
-        <div class="an-filter-group">
-          <span class="an-filter-label">Быстрый период</span>
-          <div class="an-quick-filters">${periodButtons}</div>
+  let filtersHtml = '';
+  if (AnState.tab === 'daily') {
+    const managerOptions = (State.employees || []).map(e => {
+      const name = e.fields['Имя'] || '';
+      return `<option value="${escHtml(name)}" ${AnState.manager === name ? 'selected' : ''}>${escHtml(name)}</option>`;
+    }).join('');
+    
+    const monthVal = AnState.dailyMonth || getLocalDateString().substring(0, 7);
+    
+    filtersHtml = `
+      <div class="an-filters-container">
+        <div class="an-filters-row" style="gap:16px; align-items:flex-end; flex-wrap:wrap;">
+          <div class="an-filter-group">
+            <span class="an-filter-label">Выберите месяц</span>
+            <input type="month" id="an-daily-month-select" class="an-filter-date-input" onchange="anDailySetMonth(this.value)" value="${monthVal}" style="height:36px; padding:0 12px; border-radius:10px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:#fff; font-weight:700; cursor:pointer;">
+          </div>
+          
+          <div class="an-filter-group">
+            <span class="an-filter-label">Менеджер</span>
+            <select id="an-filter-manager" onchange="anDailySetManager(this.value)" style="height:36px; padding:0 12px; border-radius:10px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:#fff; font-weight:700; cursor:pointer;">
+              <option value="">Все менеджеры</option>
+              ${managerOptions}
+            </select>
+          </div>
+          
+          <button class="an-refresh-btn" onclick="anRefresh()" style="height:36px; margin:0;">🔄 Обновить данные</button>
         </div>
-        <button class="an-refresh-btn" onclick="anRefresh()">🔄 Обновить данные</button>
       </div>
-      
-      <div class="an-filters-row" style="margin-top:12px;border-top:1px solid rgba(255,255,255,0.06);padding-top:12px">
-        <div class="an-filter-group" style="flex:1">
-          <span class="an-filter-label">Свой период</span>
-          <div class="an-custom-date-range">
-            <span class="an-date-range-text">с</span>
-            <input type="date" id="an-start-date" class="an-filter-date-input" onclick="try{this.showPicker()}catch(e){}" value="${AnState.startDate || ''}">
-            <span class="an-date-range-text">по</span>
-            <input type="date" id="an-end-date" class="an-filter-date-input" onclick="try{this.showPicker()}catch(e){}" value="${AnState.endDate || ''}">
-            <button class="an-date-btn" onclick="anApplyCustomRange()">Сформировать</button>
+    `;
+  } else {
+    filtersHtml = `
+      <div class="an-filters-container">
+        <div class="an-filters-row">
+          <div class="an-filter-group">
+            <span class="an-filter-label">Быстрый период</span>
+            <div class="an-quick-filters">${periodButtons}</div>
+          </div>
+          <button class="an-refresh-btn" onclick="anRefresh()">🔄 Обновить данные</button>
+        </div>
+        
+        <div class="an-filters-row" style="margin-top:12px;border-top:1px solid rgba(255,255,255,0.06);padding-top:12px">
+          <div class="an-filter-group" style="flex:1">
+            <span class="an-filter-label">Свой период</span>
+            <div class="an-custom-date-range">
+              <span class="an-date-range-text">с</span>
+              <input type="date" id="an-start-date" class="an-filter-date-input" onclick="try{this.showPicker()}catch(e){}" value="${AnState.startDate || ''}">
+              <span class="an-date-range-text">по</span>
+              <input type="date" id="an-end-date" class="an-filter-date-input" onclick="try{this.showPicker()}catch(e){}" value="${AnState.endDate || ''}">
+              <button class="an-date-btn" onclick="anApplyCustomRange()">Сформировать</button>
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    `;
+  }
+
+  document.getElementById('analytics-content').innerHTML = `
+    ${filtersHtml}
     <div class="an-tabs">${tabHtml}</div>
     <div id="an-tab-body"></div>`;
 
@@ -214,6 +243,8 @@ function renderAnTab() {
   } else if (AnState.tab === 'economics') {
     body.innerHTML = renderTabEconomics();
     requestAnimationFrame(initEconomicsCharts);
+  } else if (AnState.tab === 'daily') {
+    body.innerHTML = renderTabDaily();
   }
 }
 
@@ -224,7 +255,154 @@ function anSetPeriod(p) {
   AnState.endDate = null;
   renderAnalytics();
 }
+function anDailySetMonth(val) {
+  AnState.dailyMonth = val;
+  renderAnalytics();
+}
+function anDailySetManager(val) {
+  AnState.manager = val;
+  renderAnalytics();
+}
 async function anRefresh() { await loadAnalytics(); }
+
+// ─── Рендер вкладки ежедневной статистики
+function renderTabDaily() {
+  const monthVal = AnState.dailyMonth || getLocalDateString().substring(0, 7);
+  const [yearStr, monthStr] = monthVal.split('-');
+  const year = parseInt(yearStr, 10);
+  const monthIndex = parseInt(monthStr, 10) - 1; // 0-based
+  
+  const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+  
+  let leads = State.leads || [];
+  if (AnState.manager) {
+    leads = leads.filter(l => l.fields['Менеджер'] === AnState.manager);
+  }
+  
+  // Хелпер проверки архивированности
+  const activeLeads = leads.filter(l => {
+    const activeFields = window.ActiveFieldsCache?.[CONFIG.TABLES.LEADS] || [];
+    if (activeFields.includes('Архивирован')) {
+      return !(l.fields['Архивирован'] === true || l.fields['Архивирован'] === 'true');
+    }
+    const localArchived = JSON.parse(localStorage.getItem('crm_archived_leads') || '[]');
+    return !localArchived.includes(l.id);
+  });
+  
+  let html = `
+    <div class="an-daily-table-container">
+      <table class="an-daily-table">
+        <thead>
+          <tr>
+            <th>Дата</th>
+            <th>Назначено конс.</th>
+            <th>Проведено конс.</th>
+            <th>Кол-во продаж</th>
+            <th>Выручка</th>
+            <th>В кассу</th>
+          </tr>
+        </thead>
+        <tbody>
+  `;
+  
+  let weekScheduled = 0, weekConducted = 0, weekSales = 0, weekRevenue = 0, weekCash = 0;
+  let monthScheduled = 0, monthConducted = 0, monthSales = 0, monthRevenue = 0, monthCash = 0;
+  
+  let startDay = 1;
+  const daysOfWeekRu = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
+  
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dayStr = String(d).padStart(2, '0');
+    const dateKey = `${year}-${monthStr}-${dayStr}`;
+    
+    const dateObj = new Date(year, monthIndex, d);
+    const dayOfWeek = dateObj.getDay(); // 0 = Вс, 1 = Пн, ...
+    const dayOfWeekRu = daysOfWeekRu[dayOfWeek];
+    const isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
+    
+    // 1. Назначено: Все неархивированные лиды с этой датой консультации
+    const dayScheduledLeads = activeLeads.filter(l => isSameDay(l.fields['Дата консультации'], dateKey));
+    const dayScheduled = dayScheduledLeads.length;
+    
+    // 2. Проведено: Лиды с этой датой консультации и флагом "Проведена"
+    const dayConducted = dayScheduledLeads.filter(l => l.fields['Консультация проведена'] === true).length;
+    
+    // 3. Продажи: Лиды на этапе "Продано" с датой продажи на этот день
+    const daySalesLeads = leads.filter(l => 
+      getField(l.fields, CONFIG.LEAD_FIELDS.stage) === 'Продано' &&
+      isSameDay(l.fields['Дата продажи'] || l.fields['Дата'], dateKey)
+    );
+    const daySales = daySalesLeads.length;
+    const dayRevenue = daySalesLeads.reduce((s, l) => s + (Number(l.fields['Бюджет']) || 0), 0);
+    const dayCash = daySalesLeads.reduce((s, l) => s + (Number(l.fields['Оплата']) || 0), 0);
+    
+    weekScheduled += dayScheduled;
+    weekConducted += dayConducted;
+    weekSales += daySales;
+    weekRevenue += dayRevenue;
+    weekCash += dayCash;
+    
+    monthScheduled += dayScheduled;
+    monthConducted += dayConducted;
+    monthSales += daySales;
+    monthRevenue += dayRevenue;
+    monthCash += dayCash;
+    
+    const weekendClass = isWeekend ? 'class="weekend-row"' : '';
+    const dateFmt = `${dayStr}.${monthStr}.${year} (${dayOfWeekRu})`;
+    
+    html += `
+      <tr ${weekendClass}>
+        <td class="date-cell">${dateFmt}</td>
+        <td>${dayScheduled}</td>
+        <td>${dayConducted}</td>
+        <td>${daySales}</td>
+        <td class="revenue-cell">${dayRevenue > 0 ? fmt(dayRevenue) + ' ₸' : '—'}</td>
+        <td class="cash-cell">${dayCash > 0 ? fmt(dayCash) + ' ₸' : '—'}</td>
+      </tr>
+    `;
+    
+    // Выводим недельный итог
+    if (dayOfWeek === 0 || d === daysInMonth) {
+      const startDayStr = String(startDay).padStart(2, '0');
+      const endDayStr = String(d).padStart(2, '0');
+      
+      html += `
+        <tr class="an-daily-week-total">
+          <td>Итого за неделю (${startDayStr}.${monthStr} - ${endDayStr}.${monthStr})</td>
+          <td>${weekScheduled}</td>
+          <td>${weekConducted}</td>
+          <td>${weekSales}</td>
+          <td>${weekRevenue > 0 ? fmt(weekRevenue) + ' ₸' : '—'}</td>
+          <td>${weekCash > 0 ? fmt(weekCash) + ' ₸' : '—'}</td>
+        </tr>
+      `;
+      
+      weekScheduled = 0;
+      weekConducted = 0;
+      weekSales = 0;
+      weekRevenue = 0;
+      weekCash = 0;
+      startDay = d + 1;
+    }
+  }
+  
+  html += `
+        <tr class="an-daily-month-total">
+          <td>Итого за месяц</td>
+          <td>${monthScheduled}</td>
+          <td>${monthConducted}</td>
+          <td>${monthSales}</td>
+          <td>${monthRevenue > 0 ? fmt(monthRevenue) + ' ₸' : '—'}</td>
+          <td>${monthCash > 0 ? fmt(monthCash) + ' ₸' : '—'}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  `;
+  
+  return html;
+}
 
 // ══════════════════════════════════════════════
 // ВКЛ. 1 — Воронка / Трафик

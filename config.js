@@ -65,3 +65,25 @@ function getCRMCurrentUser() {
   }
 }
 
+// Разбор строки даты (поддерживает DD.MM.YYYY и YYYY-MM-DD)
+function parseDateStr(str) {
+  if (!str) return null;
+  let m = String(str).match(/(\d{2})\.(\d{2})\.(\d{4})/);
+  if (m) return new Date(+m[3], +m[2]-1, +m[1]);
+  m = String(str).match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return new Date(+m[1], +m[2]-1, +m[3]);
+  const d = new Date(str); return isNaN(d) ? null : d;
+}
+
+// Проверка совпадения дат в формате YYYY-MM-DD
+function isSameDay(dateStr, targetYmd) {
+  if (!dateStr) return false;
+  const d = parseDateStr(dateStr);
+  if (!d) return false;
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}` === targetYmd;
+}
+
+

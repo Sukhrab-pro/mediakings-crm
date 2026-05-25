@@ -270,6 +270,8 @@ const AnState = {
   period: 'all',     // all | today | week | month | custom
   startDate: null,
   endDate: null,
+  manager: '',
+  dailyMonth: getLocalDateString().substring(0, 7)
 };
 
 
