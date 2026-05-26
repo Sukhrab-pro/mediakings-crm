@@ -158,6 +158,7 @@ function renderAnalytics() {
     {key:'daily',    label:'📈 РНП продажи'},
     {key:'refunds',  label:'↩️ Возвраты'},
     {key:'economics', label:'💰 Юнит-экономика'},
+    {key:'marketing', label:'📣 Маркетинг'},
   ];
   const tabHtml = tabs.map(t =>
     `<button class="an-tab ${AnState.tab===t.key?'active':''}" onclick="anSetTab('${t.key}')">${t.label}</button>`
@@ -177,6 +178,21 @@ function renderAnalytics() {
     const storedPlan = localStorage.getItem(planKey);
     const currentPlan = storedPlan !== null ? parseFloat(storedPlan) : 0;
     AnState.pfPlan = currentPlan;
+    
+    const avgCheckKey = `crm_an_pf_avgcheck_${AnState.pfStartDate}_${AnState.pfEndDate}_${AnState.manager || 'all'}`;
+    const storedAvgCheck = localStorage.getItem(avgCheckKey);
+    const currentAvgCheck = storedAvgCheck !== null ? parseFloat(storedAvgCheck) : 0;
+    AnState.pfAvgCheck = currentAvgCheck;
+
+    const showRateKey = `crm_an_pf_showrate_${AnState.pfStartDate}_${AnState.pfEndDate}_${AnState.manager || 'all'}`;
+    const storedShowRate = localStorage.getItem(showRateKey);
+    const currentShowRate = storedShowRate !== null ? parseFloat(storedShowRate) : 0;
+    AnState.pfShowRate = currentShowRate;
+
+    const salesConvKey = `crm_an_pf_salesconv_${AnState.pfStartDate}_${AnState.pfEndDate}_${AnState.manager || 'all'}`;
+    const storedSalesConv = localStorage.getItem(salesConvKey);
+    const currentSalesConv = storedSalesConv !== null ? parseFloat(storedSalesConv) : 0;
+    AnState.pfSalesConv = currentSalesConv;
 
     const managerOptions = (State.employees || []).map(e => {
       const name = e.fields['Имя'] || '';
@@ -198,7 +214,22 @@ function renderAnalytics() {
 
           <div class="an-filter-group">
             <span class="an-filter-label">План по выручке (₸)</span>
-            <input type="number" id="an-pf-plan-input" placeholder="Введите сумму..." value="${currentPlan > 0 ? currentPlan : ''}" style="height:36px; width:160px; padding:0 12px; border-radius:10px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:#fff; font-weight:700;">
+            <input type="number" id="an-pf-plan-input" placeholder="Введите сумму..." value="${currentPlan > 0 ? currentPlan : ''}" style="height:36px; width:165px; padding:0 12px; border-radius:10px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:#fff; font-weight:700;">
+          </div>
+
+          <div class="an-filter-group">
+            <span class="an-filter-label">План по ср. чеку (₸)</span>
+            <input type="number" id="an-pf-avgcheck-input" placeholder="Введите ср. чек..." value="${currentAvgCheck > 0 ? currentAvgCheck : ''}" style="height:36px; width:165px; padding:0 12px; border-radius:10px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:#fff; font-weight:700;">
+          </div>
+
+          <div class="an-filter-group">
+            <span class="an-filter-label">Доходимость (%)</span>
+            <input type="number" id="an-pf-showrate-input" placeholder="Напр. 70" value="${currentShowRate > 0 ? currentShowRate : ''}" style="height:36px; width:115px; padding:0 12px; border-radius:10px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:#fff; font-weight:700;">
+          </div>
+
+          <div class="an-filter-group">
+            <span class="an-filter-label">Конв. в продажи (%)</span>
+            <input type="number" id="an-pf-salesconv-input" placeholder="Напр. 40" value="${currentSalesConv > 0 ? currentSalesConv : ''}" style="height:36px; width:145px; padding:0 12px; border-radius:10px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:#fff; font-weight:700;">
           </div>
 
           <div class="an-filter-group">
@@ -211,7 +242,59 @@ function renderAnalytics() {
           
           <div style="display:flex; gap:8px;">
             <button class="an-date-btn" onclick="anApplyDailyPlan()" style="height:36px; margin:0; line-height:36px; padding:0 16px;">Сформировать</button>
-            <button class="an-refresh-btn" onclick="anRefresh()" style="height:36px; margin:0; line-height:36px; padding:0 16px;">🔄 Обновить</button>
+            <button class="an-refresh-btn" onclick="anExportToExcel()" style="height:36px; margin:0; line-height:36px; padding:0 16px; background:rgba(16, 185, 129, 0.2); border: 1px solid rgba(16, 185, 129, 0.4); color: #10b981;">📥 Excel</button>
+          </div>
+        </div>
+      </div>
+    `;
+  } else if (AnState.tab === 'marketing') {
+    if (!AnState.mktStartDate || !AnState.mktEndDate) {
+      const now = new Date();
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      AnState.mktStartDate = getLocalDateString(startOfMonth);
+      AnState.mktEndDate = getLocalDateString(endOfMonth);
+    }
+    
+    const storedWebhook = localStorage.getItem('crm_mkt_n8n_webhook') || 'https://mediakings-u49260.vm.elestio.app/webhook/fetch-fb-stats';
+    const storedAdAccount = localStorage.getItem('crm_mkt_fb_account') || '2404260013056414';
+    const storedRate = localStorage.getItem('crm_mkt_usd_rate') || '450';
+    
+    AnState.mktWebhookUrl = storedWebhook;
+    AnState.mktAdAccountId = storedAdAccount;
+    AnState.mktUsdRate = parseFloat(storedRate) || 450;
+    
+    filtersHtml = `
+      <div class="an-filters-container">
+        <div class="an-filters-row" style="gap:16px; align-items:flex-end; flex-wrap:wrap;">
+          <div class="an-filter-group">
+            <span class="an-filter-label">Дата с</span>
+            <input type="date" id="an-mkt-start-date" class="an-filter-date-input" onclick="try{this.showPicker()}catch(e){}" value="${AnState.mktStartDate}" style="height:36px; padding:0 12px; border-radius:10px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:#fff; font-weight:700; cursor:pointer;">
+          </div>
+          
+          <div class="an-filter-group">
+            <span class="an-filter-label">Дата по</span>
+            <input type="date" id="an-mkt-end-date" class="an-filter-date-input" onclick="try{this.showPicker()}catch(e){}" value="${AnState.mktEndDate}" style="height:36px; padding:0 12px; border-radius:10px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:#fff; font-weight:700; cursor:pointer;">
+          </div>
+
+          <div class="an-filter-group">
+            <span class="an-filter-label">n8n Webhook URL</span>
+            <input type="text" id="an-mkt-webhook-input" placeholder="https://n8n.elest.io/..." value="${storedWebhook}" style="height:36px; width:220px; padding:0 12px; border-radius:10px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:#fff; font-weight:700;">
+          </div>
+
+          <div class="an-filter-group">
+            <span class="an-filter-label">FB Ad Account ID</span>
+            <input type="text" id="an-mkt-account-input" placeholder="123456789" value="${storedAdAccount}" style="height:36px; width:150px; padding:0 12px; border-radius:10px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:#fff; font-weight:700;">
+          </div>
+
+          <div class="an-filter-group">
+            <span class="an-filter-label">Курс USD (₸)</span>
+            <input type="number" id="an-mkt-rate-input" placeholder="450" value="${storedRate}" style="height:36px; width:90px; padding:0 12px; border-radius:10px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:#fff; font-weight:700;">
+          </div>
+          
+          <div style="display:flex; gap:8px;">
+            <button class="an-date-btn" onclick="anApplyMarketingFilters()" style="height:36px; margin:0; line-height:36px; padding:0 16px;">Сформировать</button>
+            <button class="an-refresh-btn" id="an-mkt-load-btn" onclick="anFetchFacebookData()" style="height:36px; margin:0; line-height:36px; padding:0 16px; background:rgba(59, 130, 246, 0.2); border: 1px solid rgba(59, 130, 246, 0.4); color: #60a5fa;">🔵 Получить данные FB</button>
           </div>
         </div>
       </div>
@@ -269,6 +352,8 @@ function renderAnTab() {
     requestAnimationFrame(initEconomicsCharts);
   } else if (AnState.tab === 'daily') {
     body.innerHTML = renderTabDaily();
+  } else if (AnState.tab === 'marketing') {
+    body.innerHTML = renderTabMarketing();
   }
 }
 
@@ -283,6 +368,9 @@ function anApplyDailyPlan() {
   const startVal = document.getElementById('an-pf-start-date').value;
   const endVal = document.getElementById('an-pf-end-date').value;
   const planVal = parseFloat(document.getElementById('an-pf-plan-input').value) || 0;
+  const avgCheckVal = parseFloat(document.getElementById('an-pf-avgcheck-input').value) || 0;
+  const showRateVal = parseFloat(document.getElementById('an-pf-showrate-input').value) || 0;
+  const salesConvVal = parseFloat(document.getElementById('an-pf-salesconv-input').value) || 0;
   
   if (!startVal || !endVal) {
     toast('Выберите диапазон дат', 'error');
@@ -292,9 +380,21 @@ function anApplyDailyPlan() {
   AnState.pfStartDate = startVal;
   AnState.pfEndDate = endVal;
   AnState.pfPlan = planVal;
+  AnState.pfAvgCheck = avgCheckVal;
+  AnState.pfShowRate = showRateVal;
+  AnState.pfSalesConv = salesConvVal;
   
   const planKey = `crm_an_pf_plan_${startVal}_${endVal}_${AnState.manager || 'all'}`;
   localStorage.setItem(planKey, planVal);
+  
+  const avgCheckKey = `crm_an_pf_avgcheck_${startVal}_${endVal}_${AnState.manager || 'all'}`;
+  localStorage.setItem(avgCheckKey, avgCheckVal);
+
+  const showRateKey = `crm_an_pf_showrate_${startVal}_${endVal}_${AnState.manager || 'all'}`;
+  localStorage.setItem(showRateKey, showRateVal);
+
+  const salesConvKey = `crm_an_pf_salesconv_${startVal}_${endVal}_${AnState.manager || 'all'}`;
+  localStorage.setItem(salesConvKey, salesConvVal);
   
   renderAnalytics();
 }
@@ -305,6 +405,52 @@ function anDailySetManager(val) {
 }
 
 async function anRefresh() { await loadAnalytics(); }
+
+function anExportToExcel() {
+  const table = document.querySelector('.an-daily-table');
+  if (!table) {
+    toast('Таблица для экспорта не найдена', 'error');
+    return;
+  }
+  
+  const tableHtml = table.outerHTML;
+  const template = `
+    <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+    <head>
+      <meta http-equiv="content-type" content="application/vnd.ms-excel; charset=UTF-8">
+      <style>
+        table { border-collapse: collapse; font-family: Arial, sans-serif; font-size: 11pt; }
+        th { background-color: #0f172a; color: #ffffff; border: 1px solid #334155; font-weight: bold; text-align: center; padding: 6px; }
+        td { border: 1px solid #e2e8f0; text-align: center; padding: 4px; }
+        .date-cell { text-align: left; }
+        .weekend-row { background-color: #fef2f2; }
+        .an-daily-week-total { background-color: #e0e7ff; font-weight: bold; }
+        .an-daily-month-total { background-color: #d1fae5; font-weight: bold; }
+        .revenue-cell { color: #059669; }
+        .cash-cell { color: #2563eb; }
+        .plan-val { color: #64748b; }
+        .fact-val { font-weight: bold; }
+      </style>
+    </head>
+    <body>
+      ${tableHtml}
+    </body>
+    </html>
+  `;
+  
+  const blob = new Blob([template], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  
+  const filename = `РНП_Продажи_${AnState.pfStartDate}_${AnState.pfEndDate}.xls`;
+  
+  link.setAttribute('href', url);
+  link.setAttribute('download', filename);
+  link.style.visibility = 'hidden';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
 
 // Вспомогательная функция проверки вхождения даты в диапазон
 function isDateInRange(dateStr, startYmd, endYmd) {
@@ -384,9 +530,24 @@ function renderTabDaily() {
       }
     });
     
-    avgCheck = totalFactSales > 0 ? totalFactRevenue / totalFactSales : 300000;
-    salesConv = totalFactConducted > 0 ? totalFactSales / totalFactConducted : 0.40;
-    showRate = totalFactScheduled > 0 ? totalFactConducted / totalFactScheduled : 0.70;
+    if (AnState.pfAvgCheck > 0) {
+      avgCheck = AnState.pfAvgCheck;
+    } else {
+      avgCheck = totalFactSales > 0 ? totalFactRevenue / totalFactSales : 300000;
+    }
+
+    if (AnState.pfSalesConv > 0) {
+      salesConv = AnState.pfSalesConv / 100;
+    } else {
+      salesConv = totalFactConducted > 0 ? totalFactSales / totalFactConducted : 0.40;
+    }
+
+    if (AnState.pfShowRate > 0) {
+      showRate = AnState.pfShowRate / 100;
+    } else {
+      showRate = totalFactScheduled > 0 ? totalFactConducted / totalFactScheduled : 0.70;
+    }
+
     cashRatio = totalFactRevenue > 0 ? totalFactCash / totalFactRevenue : 1.0;
     
     planRevenue = AnState.pfPlan;
@@ -634,6 +795,208 @@ function renderTabDaily() {
   `;
   
   return html;
+}
+
+// 📣 ВКЛЮЧЕНИЕ — Маркетинг & Окупаемость трафика
+function renderTabMarketing() {
+  const cacheKey = `crm_mkt_cache_${AnState.mktStartDate}_${AnState.mktEndDate}_${AnState.mktAdAccountId}`;
+  const cachedDataStr = localStorage.getItem(cacheKey);
+  const cachedData = cachedDataStr ? JSON.parse(cachedDataStr) : { spend: 0, clicks: 0, impressions: 0 };
+  
+  const rawSpend = cachedData.spend || 0;
+  const clicks = cachedData.clicks || 0;
+  const impressions = cachedData.impressions || 0;
+  const spendKzt = Math.round(rawSpend * AnState.mktUsdRate);
+
+  // Сбор статистики по лидам из базы CRM за этот период
+  let leadsList = State.leads || [];
+  
+  // Фильтруем лиды по дате (вхождение в диапазон)
+  const periodLeads = leadsList.filter(l => 
+    isDateInRange(l.fields['Дата'], AnState.mktStartDate, AnState.mktEndDate)
+  );
+
+  // Фильтруем лиды, у которых источник содержит FB/Inst/Таргет
+  const fbLeads = periodLeads.filter(l => {
+    const src = String(getField(l.fields, CONFIG.LEAD_FIELDS.source) || '').toLowerCase();
+    return src.includes('facebook') || src.includes('instagram') || src.includes('fb') || src.includes('inst') || src.includes('таргет');
+  });
+
+  const totalLeads = fbLeads.length;
+
+  // Фильтруем продажи за этот период, пришедшие из таргета
+  const fbSalesLeads = leadsList.filter(l => 
+    getField(l.fields, CONFIG.LEAD_FIELDS.stage) === 'Продано' &&
+    isDateInRange(l.fields['Дата продажи'] || l.fields['Дата'], AnState.mktStartDate, AnState.mktEndDate) &&
+    (function() {
+      const src = String(getField(l.fields, CONFIG.LEAD_FIELDS.source) || '').toLowerCase();
+      return src.includes('facebook') || src.includes('instagram') || src.includes('fb') || src.includes('inst') || src.includes('таргет');
+    })()
+  );
+
+  const totalSales = fbSalesLeads.length;
+  const revenue = fbSalesLeads.reduce((sum, l) => sum + (Number(l.fields['Бюджет']) || 0), 0);
+
+  // Метрики
+  const CTR = impressions > 0 ? ((clicks / impressions) * 100).toFixed(2) : '0.00';
+  const CPC = clicks > 0 ? Math.round(spendKzt / clicks) : 0;
+  const CPL = totalLeads > 0 ? Math.round(spendKzt / totalLeads) : 0;
+  const CR_Lead = clicks > 0 ? ((totalLeads / clicks) * 100).toFixed(1) : '0.0';
+  const CR_Sale = totalLeads > 0 ? ((totalSales / totalLeads) * 100).toFixed(1) : '0.0';
+  const CAC = totalSales > 0 ? Math.round(spendKzt / totalSales) : 0;
+  const ROMI = spendKzt > 0 ? Math.round(((revenue - spendKzt) / spendKzt) * 100) : 0;
+
+  const html = `
+    <div class="an-marketing-container">
+      <div class="an-stats-grid" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:16px; margin-bottom:24px;">
+        <!-- Расход -->
+        <div class="an-stat-card" style="background:rgba(239, 68, 68, 0.05); border:1px solid rgba(239, 68, 68, 0.15); padding:16px 20px; border-radius:16px; box-sizing:border-box;">
+          <div class="an-stat-label" style="color:#fca5a5; font-size:11px; text-transform:uppercase; font-weight:700; margin-bottom:6px; letter-spacing:0.05em;">💰 Расход рекламы</div>
+          <div class="an-stat-value" style="color:#ef4444; font-size:24px; font-weight:800; line-height:1.2;">${fmt(spendKzt)} ₸</div>
+          <div class="an-stat-desc" style="color:#f87171; font-size:11px; margin-top:4px;">$ ${rawSpend.toFixed(2)} (курс ${AnState.mktUsdRate})</div>
+        </div>
+        
+        <!-- Трафик -->
+        <div class="an-stat-card" style="background:rgba(59, 130, 246, 0.05); border:1px solid rgba(59, 130, 246, 0.15); padding:16px 20px; border-radius:16px; box-sizing:border-box;">
+          <div class="an-stat-label" style="color:#93c5fd; font-size:11px; text-transform:uppercase; font-weight:700; margin-bottom:6px; letter-spacing:0.05em;">📈 Трафик (Клики / Показы)</div>
+          <div class="an-stat-value" style="color:#3b82f6; font-size:24px; font-weight:800; line-height:1.2;">${fmt(clicks)} / ${fmt(impressions)}</div>
+          <div class="an-stat-desc" style="color:#60a5fa; font-size:11px; margin-top:4px;">CTR: <strong>${CTR}%</strong> | CPC: <strong>${CPC} ₸</strong></div>
+        </div>
+
+        <!-- Лиды -->
+        <div class="an-stat-card" style="background:rgba(45, 212, 191, 0.05); border:1px solid rgba(45, 212, 191, 0.15); padding:16px 20px; border-radius:16px; box-sizing:border-box;">
+          <div class="an-stat-label" style="color:#99f6e4; font-size:11px; text-transform:uppercase; font-weight:700; margin-bottom:6px; letter-spacing:0.05em;">🎯 Лиды (Таргет FB/Inst)</div>
+          <div class="an-stat-value" style="color:#0d9488; font-size:24px; font-weight:800; line-height:1.2;">${totalLeads}</div>
+          <div class="an-stat-desc" style="color:#14b8a6; font-size:11px; margin-top:4px;">Конв. в лид: <strong>${CR_Lead}%</strong> | CPL: <strong>${fmt(CPL)} ₸</strong></div>
+        </div>
+
+        <!-- Результат -->
+        <div class="an-stat-card" style="background:rgba(16, 185, 129, 0.05); border:1px solid rgba(16, 185, 129, 0.15); padding:16px 20px; border-radius:16px; box-sizing:border-box;">
+          <div class="an-stat-label" style="color:#6ee7b7; font-size:11px; text-transform:uppercase; font-weight:700; margin-bottom:6px; letter-spacing:0.05em;">🏆 Продажи и Выручка</div>
+          <div class="an-stat-value" style="color:#10b981; font-size:24px; font-weight:800; line-height:1.2;">${totalSales} / ${fmt(revenue)} ₸</div>
+          <div class="an-stat-desc" style="color:#34d399; font-size:11px; margin-top:4px;">CAC: <strong>${fmt(CAC)} ₸</strong> | ROMI: <strong>${ROMI}%</strong></div>
+        </div>
+      </div>
+
+      <!-- Детальная воронка маркетинга -->
+      <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); border-radius:16px; padding:20px; margin-bottom:24px;">
+        <h3 style="margin-top:0; margin-bottom:20px; font-size:16px; font-weight:700; color:#fff; display:flex; align-items:center; gap:8px;">📊 Воронка окупаемости таргета</h3>
+        <div style="display:flex; flex-direction:column; gap:16px;">
+          <!-- Показы -->
+          <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+            <div style="width:140px; font-size:13px; color:var(--text2); font-weight:600;">Показы</div>
+            <div style="flex:1; min-width:200px; height:24px; background:rgba(255,255,255,0.03); border-radius:12px; overflow:hidden; position:relative; border:1px solid rgba(255,255,255,0.05);">
+              <div style="width:100%; height:100%; background:linear-gradient(90deg, #3b82f6, #1d4ed8); border-radius:12px;"></div>
+              <span style="position:absolute; left:12px; top:50%; transform:translateY(-50%); font-size:12px; font-weight:800; color:#fff;">${fmt(impressions)}</span>
+            </div>
+            <div style="width:100px; font-size:12px; color:var(--text2); text-align:right; font-weight:700;">—</div>
+          </div>
+          <!-- Клики -->
+          <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+            <div style="width:140px; font-size:13px; color:var(--text2); font-weight:600;">Клики (переходы)</div>
+            <div style="flex:1; min-width:200px; height:24px; background:rgba(255,255,255,0.03); border-radius:12px; overflow:hidden; position:relative; border:1px solid rgba(255,255,255,0.05);">
+              <div style="width:${parseFloat(CTR) > 0 ? Math.min(100, parseFloat(CTR) * 15) : 0}%; height:100%; background:linear-gradient(90deg, #8b5cf6, #6d28d9); border-radius:12px; min-width:4px;"></div>
+              <span style="position:absolute; left:12px; top:50%; transform:translateY(-50%); font-size:12px; font-weight:800; color:#fff;">${fmt(clicks)}</span>
+            </div>
+            <div style="width:100px; font-size:12px; color:#a78bfa; text-align:right; font-weight:700;">CTR: ${CTR}%</div>
+          </div>
+          <!-- Лиды -->
+          <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+            <div style="width:140px; font-size:13px; color:var(--text2); font-weight:600;">Лиды (заявки)</div>
+            <div style="flex:1; min-width:200px; height:24px; background:rgba(255,255,255,0.03); border-radius:12px; overflow:hidden; position:relative; border:1px solid rgba(255,255,255,0.05);">
+              <div style="width:${parseFloat(CR_Lead) > 0 ? Math.min(100, parseFloat(CR_Lead) * 4) : 0}%; height:100%; background:linear-gradient(90deg, #06b6d4, #0891b2); border-radius:12px; min-width:4px;"></div>
+              <span style="position:absolute; left:12px; top:50%; transform:translateY(-50%); font-size:12px; font-weight:800; color:#fff;">${totalLeads}</span>
+            </div>
+            <div style="width:100px; font-size:12px; color:#22d3ee; text-align:right; font-weight:700;">CR Лид: ${CR_Lead}%</div>
+          </div>
+          <!-- Продажи -->
+          <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+            <div style="width:140px; font-size:13px; color:var(--text2); font-weight:600;">Продажи (сделки)</div>
+            <div style="flex:1; min-width:200px; height:24px; background:rgba(255,255,255,0.03); border-radius:12px; overflow:hidden; position:relative; border:1px solid rgba(255,255,255,0.05);">
+              <div style="width:${parseFloat(CR_Sale) > 0 ? Math.min(100, parseFloat(CR_Sale) * 5) : 0}%; height:100%; background:linear-gradient(90deg, #10b981, #059669); border-radius:12px; min-width:4px;"></div>
+              <span style="position:absolute; left:12px; top:50%; transform:translateY(-50%); font-size:12px; font-weight:800; color:#fff;">${totalSales}</span>
+            </div>
+            <div style="width:100px; font-size:12px; color:#34d399; text-align:right; font-weight:700;">CR Прод: ${CR_Sale}%</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  return html;
+}
+
+function anApplyMarketingFilters() {
+  const startVal = document.getElementById('an-mkt-start-date').value;
+  const endVal = document.getElementById('an-mkt-end-date').value;
+  const webhookVal = document.getElementById('an-mkt-webhook-input').value.trim();
+  const accountVal = document.getElementById('an-mkt-account-input').value.trim();
+  const rateVal = parseFloat(document.getElementById('an-mkt-rate-input').value) || 450;
+
+  if (!startVal || !endVal) {
+    toast('Выберите диапазон дат', 'error');
+    return;
+  }
+
+  AnState.mktStartDate = startVal;
+  AnState.mktEndDate = endVal;
+  AnState.mktWebhookUrl = webhookVal;
+  AnState.mktAdAccountId = accountVal;
+  AnState.mktUsdRate = rateVal;
+
+  localStorage.setItem('crm_mkt_n8n_webhook', webhookVal);
+  localStorage.setItem('crm_mkt_fb_account', accountVal);
+  localStorage.setItem('crm_mkt_usd_rate', rateVal);
+
+  renderAnalytics();
+}
+
+async function anFetchFacebookData() {
+  const webhookUrl = document.getElementById('an-mkt-webhook-input').value.trim();
+  const accountId = document.getElementById('an-mkt-account-input').value.trim();
+  const startDate = document.getElementById('an-mkt-start-date').value;
+  const endDate = document.getElementById('an-mkt-end-date').value;
+  
+  if (!webhookUrl) {
+    toast('Укажите n8n Webhook URL', 'error');
+    return;
+  }
+  if (!accountId) {
+    toast('Укажите FB Ad Account ID', 'error');
+    return;
+  }
+
+  const btn = document.getElementById('an-mkt-load-btn');
+  const oldText = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spinner" style="width:12px; height:12px; border-width:2px; vertical-align:middle; display:inline-block; border: 2px solid #fff; border-top: 2px solid transparent; border-radius: 50%; animation: spin 1s linear infinite; margin-right:6px;"></span> Загрузка...`;
+
+  try {
+    anApplyMarketingFilters();
+
+    const url = `${webhookUrl}?start_date=${startDate}&end_date=${endDate}&ad_account_id=${accountId}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Ошибка сервера n8n: ${res.status}`);
+    const data = await res.json();
+    
+    // Ожидаемый формат ответа от n8n:
+    // { spend: 120.45, clicks: 1500, impressions: 85000 }
+    const spend = parseFloat(data.spend) || 0;
+    const clicks = parseInt(data.clicks) || 0;
+    const impressions = parseInt(data.impressions) || 0;
+
+    const cacheKey = `crm_mkt_cache_${startDate}_${endDate}_${accountId}`;
+    const resultObj = { spend, clicks, impressions };
+    localStorage.setItem(cacheKey, JSON.stringify(resultObj));
+
+    toast('Данные успешно загружены из Facebook!', 'success');
+  } catch (e) {
+    console.error(e);
+    toast(`Не удалось загрузить данные: ${e.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = oldText;
+    renderAnalytics();
+  }
 }
 
 // ══════════════════════════════════════════════

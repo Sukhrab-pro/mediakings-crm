@@ -273,7 +273,15 @@ const AnState = {
   manager: '',
   pfStartDate: '',
   pfEndDate: '',
-  pfPlan: 0
+  pfPlan: 0,
+  pfAvgCheck: 0,
+  pfSalesConv: 0,
+  pfShowRate: 0,
+  mktStartDate: '',
+  mktEndDate: '',
+  mktWebhookUrl: '',
+  mktAdAccountId: '',
+  mktUsdRate: 450
 };
 
 
