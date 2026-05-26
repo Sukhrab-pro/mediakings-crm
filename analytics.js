@@ -1044,10 +1044,20 @@ async function anImportExcelReport(event) {
 
       const headers = rows[0].map(h => String(h || '').trim().toLowerCase());
       
-      // Находим нужные колонки
-      const spendIdx = headers.findIndex(h => h.includes('потраченная сумма') || h.includes('spend') || h.includes('расход'));
-      const impressionsIdx = headers.findIndex(h => h.includes('показы') || h.includes('impressions') || h.includes('показ'));
-      const clicksIdx = headers.findIndex(h => h.includes('клики') || h.includes('результат') || h.includes('начата переписка') || h.includes('clicks') || h.includes('переходы'));
+      // Находим нужные колонки (сначала ищем точное совпадение, потом частичное)
+      let spendIdx = headers.findIndex(h => h === 'потраченная сумма (usd)' || h === 'потраченная сумма' || h === 'spend' || h === 'amount spent' || h === 'расход');
+      let impressionsIdx = headers.findIndex(h => h === 'показы' || h === 'impressions');
+      let clicksIdx = headers.findIndex(h => h === 'результат' || h === 'начата переписка' || h === 'клики' || h === 'clicks' || h === 'link clicks' || h === 'переходы');
+
+      if (spendIdx === -1) {
+        spendIdx = headers.findIndex(h => h.includes('потраченная сумма') || h.includes('spend') || h.includes('расход') || h.includes('amount spent'));
+      }
+      if (impressionsIdx === -1) {
+        impressionsIdx = headers.findIndex(h => h.includes('показы') || h.includes('impressions'));
+      }
+      if (clicksIdx === -1) {
+        clicksIdx = headers.findIndex(h => h.includes('результат') || h.includes('начата переписка') || h.includes('клики') || h.includes('clicks') || h.includes('переходы'));
+      }
 
       if (spendIdx === -1 || impressionsIdx === -1) {
         toast('В файле не найдены колонки "Потраченная сумма" или "Показы"', 'error');
