@@ -2,14 +2,20 @@
 async function loadAnalytics() {
   spinner('analytics-content');
   try {
-    const [leads, deals, tariffs, services, employees] = await Promise.all([
+    const [leads, deals, tariffs, services, employees, marketing] = await Promise.all([
       Airtable.getAll(CONFIG.TABLES.LEADS),
       Airtable.getAll(CONFIG.TABLES.DEALS),
       Airtable.getAll(CONFIG.TABLES.TARIFFS),
       Airtable.getAll(CONFIG.TABLES.SERVICES),
       Airtable.getAll(CONFIG.TABLES.EMPLOYEES),
+      Airtable.getAll(CONFIG.TABLES.MARKETING),
     ]);
-    State.leads = leads; State.deals = deals; State.tariffs = tariffs; State.services = services; State.employees = employees;
+    State.leads = leads;
+    State.deals = deals;
+    State.tariffs = tariffs;
+    State.services = services;
+    State.employees = employees;
+    State.marketing = marketing || [];
     renderAnalytics();
   } catch(e) {
     document.getElementById('analytics-content').innerHTML =
@@ -801,13 +807,43 @@ function renderTabDaily() {
 
 // 📣 ВКЛЮЧЕНИЕ — Маркетинг & Окупаемость трафика
 function renderTabMarketing() {
-  const cacheKey = `crm_mkt_cache_${AnState.mktStartDate}_${AnState.mktEndDate}_${AnState.mktAdAccountId}`;
-  const cachedDataStr = localStorage.getItem(cacheKey);
-  const cachedData = cachedDataStr ? JSON.parse(cachedDataStr) : { spend: 0, clicks: 0, impressions: 0 };
+  let rawSpend = 0;
+  let clicks = 0;
+  let impressions = 0;
+
+  // Фильтруем и суммируем данные из Baserow
+  const mktList = State.marketing || [];
+  const filteredMkt = mktList.filter(item => {
+    const fields = item.fields || {};
+    const acc = String(fields['Аккаунт'] || '').trim();
+    const dateStr = fields['Дата'];
+    
+    if (AnState.mktAdAccountId && acc !== String(AnState.mktAdAccountId).trim()) {
+      return false;
+    }
+    if (!isDateInRange(dateStr, AnState.mktStartDate, AnState.mktEndDate)) {
+      return false;
+    }
+    return true;
+  });
+
+  if (filteredMkt.length > 0) {
+    filteredMkt.forEach(item => {
+      const fields = item.fields || {};
+      rawSpend += parseFloat(fields['Расход']) || 0;
+      clicks += parseInt(fields['Клики']) || 0;
+      impressions += parseInt(fields['Показы']) || 0;
+    });
+  } else {
+    // Фолбек на локальный кэш (например, для n8n вебхука или старых сессий)
+    const cacheKey = `crm_mkt_cache_${AnState.mktStartDate}_${AnState.mktEndDate}_${AnState.mktAdAccountId}`;
+    const cachedDataStr = localStorage.getItem(cacheKey);
+    const cachedData = cachedDataStr ? JSON.parse(cachedDataStr) : { spend: 0, clicks: 0, impressions: 0 };
+    rawSpend = cachedData.spend || 0;
+    clicks = cachedData.clicks || 0;
+    impressions = cachedData.impressions || 0;
+  }
   
-  const rawSpend = cachedData.spend || 0;
-  const clicks = cachedData.clicks || 0;
-  const impressions = cachedData.impressions || 0;
   const spendKzt = Math.round(rawSpend * AnState.mktUsdRate);
 
   // Сбор статистики по лидам из базы CRM за этот период
@@ -1001,9 +1037,50 @@ async function anFetchFacebookData() {
   }
 }
 
+function formatExcelDate(cellVal) {
+  if (!cellVal) return null;
+  
+  // Если это объект Date
+  if (cellVal instanceof Date) {
+    return getLocalDateString(cellVal);
+  }
+  
+  // Если это строка (например "2026-04-25" или "25.04.2026")
+  if (typeof cellVal === 'string') {
+    const s = cellVal.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    const m = s.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+    if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+    
+    const d = new Date(s);
+    if (!isNaN(d)) return getLocalDateString(d);
+  }
+  
+  // Если это число (код даты Excel)
+  if (typeof cellVal === 'number') {
+    try {
+      // Добавляем 12 часов сдвига во избежание сбоев локального часового пояса
+      const utcMs = Math.round((cellVal - 25569) * 86400 * 1000);
+      const d = new Date(utcMs + 12 * 60 * 60 * 1000);
+      if (!isNaN(d)) return getLocalDateString(d);
+    } catch(e) {
+      console.warn('Error parsing Excel numeric date:', e);
+    }
+  }
+  
+  return null;
+}
+
 async function anImportExcelReport(event) {
   const file = event.target.files[0];
   if (!file) return;
+
+  const accountId = document.getElementById('an-mkt-account-input').value.trim();
+  if (!accountId) {
+    toast('Пожалуйста, введите FB Ad Account ID перед импортом', 'error');
+    event.target.value = '';
+    return;
+  }
 
   const btn = document.getElementById('an-mkt-load-btn');
   const oldText = btn.innerHTML;
@@ -1024,12 +1101,13 @@ async function anImportExcelReport(event) {
       toast('Не удалось загрузить библиотеку Excel', 'error');
       btn.disabled = false;
       btn.innerHTML = oldText;
+      event.target.value = '';
       return;
     }
   }
 
   const reader = new FileReader();
-  reader.onload = function(e) {
+  reader.onload = async function(e) {
     try {
       const data = new Uint8Array(e.target.result);
       const workbook = XLSX.read(data, { type: 'array' });
@@ -1039,70 +1117,102 @@ async function anImportExcelReport(event) {
 
       if (rows.length < 2) {
         toast('Файл пустой или имеет неверный формат', 'error');
+        btn.disabled = false;
+        btn.innerHTML = oldText;
         return;
       }
 
       const headers = rows[0].map(h => String(h || '').trim().toLowerCase());
       
-      // Находим нужные колонки (сначала ищем точное совпадение, потом частичное)
       let spendIdx = headers.findIndex(h => h === 'потраченная сумма (usd)' || h === 'потраченная сумма' || h === 'spend' || h === 'amount spent' || h === 'расход');
       let impressionsIdx = headers.findIndex(h => h === 'показы' || h === 'impressions');
       let clicksIdx = headers.findIndex(h => h === 'результат' || h === 'начата переписка' || h === 'клики' || h === 'clicks' || h === 'link clicks' || h === 'переходы');
+      let dateIdx = headers.findIndex(h => h === 'дата начала отчетности' || h === 'дата' || h === 'date' || h === 'reporting starts' || h === 'reporting start date');
+      let nameIdx = headers.findIndex(h => h === 'название группы объявлений' || h === 'имя' || h === 'name' || h === 'ad set name' || h === 'adset' || h === 'название');
 
-      if (spendIdx === -1) {
-        spendIdx = headers.findIndex(h => h.includes('потраченная сумма') || h.includes('spend') || h.includes('расход') || h.includes('amount spent'));
-      }
-      if (impressionsIdx === -1) {
-        impressionsIdx = headers.findIndex(h => h.includes('показы') || h.includes('impressions'));
-      }
-      if (clicksIdx === -1) {
-        clicksIdx = headers.findIndex(h => h.includes('результат') || h.includes('начата переписка') || h.includes('клики') || h.includes('clicks') || h.includes('переходы'));
-      }
+      if (spendIdx === -1) spendIdx = headers.findIndex(h => h.includes('потраченная сумма') || h.includes('spend') || h.includes('расход') || h.includes('amount spent'));
+      if (impressionsIdx === -1) impressionsIdx = headers.findIndex(h => h.includes('показы') || h.includes('impressions'));
+      if (clicksIdx === -1) clicksIdx = headers.findIndex(h => h.includes('результат') || h.includes('начата переписка') || h.includes('клики') || h.includes('clicks') || h.includes('переходы'));
+      if (dateIdx === -1) dateIdx = headers.findIndex(h => h.includes('дата') || h.includes('date') || h.includes('reporting start'));
+      if (nameIdx === -1) nameIdx = headers.findIndex(h => h.includes('групп') || h.includes('объявлен') || h.includes('name') || h.includes('adset') || h.includes('имя'));
 
-      if (spendIdx === -1 || impressionsIdx === -1) {
-        toast('В файле не найдены колонки "Потраченная сумма" или "Показы"', 'error');
+      if (spendIdx === -1 || impressionsIdx === -1 || dateIdx === -1 || nameIdx === -1) {
+        toast('В файле не найдены обязательные колонки: Потраченная сумма, Показы, Дата или Название группы', 'error');
+        btn.disabled = false;
+        btn.innerHTML = oldText;
         return;
       }
 
-      let totalSpend = 0;
-      let totalImpressions = 0;
-      let totalClicks = 0;
+      // Загружаем текущие маркетинговые данные для поиска дубликатов
+      toast('Анализ дубликатов в базе Baserow...', 'info');
+      const allMkt = await Airtable.getAll(CONFIG.TABLES.MARKETING);
 
-      // Суммируем данные по строкам
+      const toDeleteIds = [];
+      const newRecordsToCreate = [];
+
       for (let i = 1; i < rows.length; i++) {
         const row = rows[i];
         if (!row || row.length === 0) continue;
 
-        totalSpend += parseFloat(row[spendIdx]) || 0;
-        totalImpressions += parseInt(row[impressionsIdx]) || 0;
-        
-        if (clicksIdx !== -1) {
-          totalClicks += parseInt(row[clicksIdx]) || 0;
+        const rawDate = row[dateIdx];
+        const dateStr = formatExcelDate(rawDate);
+        if (!dateStr) continue;
+
+        const nameStr = String(row[nameIdx] || '').trim();
+        if (!nameStr) continue;
+
+        const spendVal = parseFloat(row[spendIdx]) || 0;
+        const impressionsVal = parseInt(row[impressionsIdx]) || 0;
+        const clicksVal = clicksIdx !== -1 ? (parseInt(row[clicksIdx]) || 0) : 0;
+
+        // Поиск совпадений: такая же Дата, Аккаунт и Имя группы
+        const matched = allMkt.filter(m => {
+          const mDate = m.fields['Дата'];
+          const mName = String(m.fields['Имя'] || '').trim();
+          const mAccount = String(m.fields['Аккаунт'] || '').trim();
+          return mDate === dateStr && mName === nameStr && mAccount === accountId;
+        });
+
+        if (matched.length > 0) {
+          matched.forEach(m => {
+            if (!toDeleteIds.includes(m.id)) {
+              toDeleteIds.push(m.id);
+            }
+          });
         }
+
+        newRecordsToCreate.push({
+          'Имя': nameStr,
+          'Дата': dateStr,
+          'Расход': spendVal,
+          'Показы': impressionsVal,
+          'Клики': clicksVal,
+          'Аккаунт': accountId
+        });
       }
 
-      // Сохраняем в кэш под текущими фильтрами
-      const startDate = document.getElementById('an-mkt-start-date').value;
-      const endDate = document.getElementById('an-mkt-end-date').value;
-      const accountId = document.getElementById('an-mkt-account-input').value.trim();
+      // Удаляем найденные дубликаты
+      if (toDeleteIds.length > 0) {
+        toast(`Удаляем дубликаты (${toDeleteIds.length})...`, 'info');
+        await Airtable.batchDelete(CONFIG.TABLES.MARKETING, toDeleteIds);
+      }
 
-      const cacheKey = `crm_mkt_cache_${startDate}_${endDate}_${accountId}`;
-      const resultObj = {
-        spend: parseFloat(totalSpend.toFixed(2)),
-        clicks: totalClicks,
-        impressions: totalImpressions
-      };
+      // Добавляем новые записи
+      if (newRecordsToCreate.length > 0) {
+        toast(`Записываем новые данные (${newRecordsToCreate.length})...`, 'info');
+        await Airtable.batchCreate(CONFIG.TABLES.MARKETING, newRecordsToCreate);
+      }
 
-      localStorage.setItem(cacheKey, JSON.stringify(resultObj));
-      toast(`Импортировано: Расход $${resultObj.spend}, Результаты: ${resultObj.clicks}, Показы: ${resultObj.impressions}`, 'success');
+      toast(`Успешно импортировано: добавлено ${newRecordsToCreate.length} строк, удалено ${toDeleteIds.length} дубликатов.`, 'success');
       
-      renderAnalytics();
+      // Перезагружаем аналитику, чтобы перерисовать UI
+      await loadAnalytics();
     } catch (err) {
       console.error(err);
-      toast(`Ошибка чтения Excel: ${err.message}`, 'error');
-    } finally {
+      toast(`Ошибка обработки и сохранения Excel: ${err.message}`, 'error');
       btn.disabled = false;
       btn.innerHTML = oldText;
+    } finally {
       event.target.value = ''; // Сбросить инпут
     }
   };

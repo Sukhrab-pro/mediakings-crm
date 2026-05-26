@@ -259,6 +259,16 @@ const FIELD_MAPS = {
         'Примечание': 'Примечание', 'Кто добавил': 'Кто добавил', 'Дата добавления': 'Дата добавления',
         'Валюта': 'Валюта', 'Сотрудник': 'Сотрудник', 'Заказ': 'Заказ'
       };
+    },
+    get [CONFIG.TABLES.MARKETING]() {
+      return {
+        'Name': 'Имя', 'Имя': 'Имя',
+        'Дата': 'Дата',
+        'Расход': 'Расход',
+        'Показы': 'Показы',
+        'Клики': 'Клики',
+        'Аккаунт': 'Аккаунт'
+      };
     }
   },
   toBaserow: {
@@ -379,6 +389,16 @@ const FIELD_MAPS = {
         'Источник ID': 'Источник', 'Категория ID': 'Категория', 'Сумма': 'Сумма',
         'Примечание': 'Примечание', 'Кто добавил': 'Кто добавил', 'Дата добавления': 'Дата добавления',
         'Валюта': 'Валюта', 'Сотрудник ID': 'Сотрудник', 'Заказ ID': 'Заказ'
+      };
+    },
+    get [CONFIG.TABLES.MARKETING]() {
+      return {
+        'Имя': 'Name',
+        'Дата': 'Дата',
+        'Расход': 'Расход',
+        'Показы': 'Показы',
+        'Клики': 'Клики',
+        'Аккаунт': 'Аккаунт'
       };
     }
   },
@@ -625,6 +645,48 @@ const Baserow = {
       console.warn('Failed to fetch role permissions from Baserow:', e.message);
     }
     return null;
+  },
+
+  // Создать строки пакетом (batch create)
+  async batchCreate(tableId, items) {
+    if (!tableId || !items || !items.length) return { records: [] };
+    const baserowItems = [];
+    for (const fields of items) {
+      const body = denormalizeFields(fields, tableId);
+      if (body) {
+        baserowItems.push(body);
+      }
+    }
+    if (baserowItems.length === 0) return { records: [] };
+    const BATCH_SIZE = 150;
+    const results = [];
+    for (let i = 0; i < baserowItems.length; i += BATCH_SIZE) {
+      const chunk = baserowItems.slice(i, i + BATCH_SIZE);
+      const res = await Baserow.req('POST',
+        `/database/rows/table/${tableId}/batch/?user_field_names=true`,
+        { items: chunk }
+      );
+      if (res && res.items) {
+        results.push(...res.items.map(r => normalizeRow(r, tableId)));
+      }
+    }
+    return { records: results };
+  },
+
+  // Удалить строки пакетом (batch delete)
+  async batchDelete(tableId, ids) {
+    if (!tableId || !ids || !ids.length) return {};
+    const numericIds = ids.map(id => parseInt(id, 10)).filter(Number.isInteger);
+    if (numericIds.length === 0) return {};
+    const BATCH_SIZE = 150;
+    for (let i = 0; i < numericIds.length; i += BATCH_SIZE) {
+      const chunk = numericIds.slice(i, i + BATCH_SIZE);
+      await Baserow.req('POST',
+        `/database/rows/table/${tableId}/batch-delete/`,
+        { items: chunk }
+      );
+    }
+    return {};
   },
 };
 
