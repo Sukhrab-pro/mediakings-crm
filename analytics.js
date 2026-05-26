@@ -292,9 +292,11 @@ function renderAnalytics() {
             <input type="number" id="an-mkt-rate-input" placeholder="450" value="${storedRate}" style="height:36px; width:90px; padding:0 12px; border-radius:10px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:#fff; font-weight:700;">
           </div>
           
-          <div style="display:flex; gap:8px;">
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
             <button class="an-date-btn" onclick="anApplyMarketingFilters()" style="height:36px; margin:0; line-height:36px; padding:0 16px;">Сформировать</button>
             <button class="an-refresh-btn" id="an-mkt-load-btn" onclick="anFetchFacebookData()" style="height:36px; margin:0; line-height:36px; padding:0 16px; background:rgba(59, 130, 246, 0.2); border: 1px solid rgba(59, 130, 246, 0.4); color: #60a5fa;">🔵 Получить данные FB</button>
+            <button class="an-refresh-btn" onclick="document.getElementById('an-mkt-file-input').click()" style="height:36px; margin:0; line-height:36px; padding:0 16px; background:rgba(16, 185, 129, 0.2); border: 1px solid rgba(16, 185, 129, 0.4); color: #34d399;">📂 Импорт Excel</button>
+            <input type="file" id="an-mkt-file-input" accept=".xlsx,.xls,.csv" onchange="anImportExcelReport(event)" style="display:none;">
           </div>
         </div>
       </div>
@@ -997,6 +999,104 @@ async function anFetchFacebookData() {
     btn.innerHTML = oldText;
     renderAnalytics();
   }
+}
+
+async function anImportExcelReport(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  const btn = document.getElementById('an-mkt-load-btn');
+  const oldText = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spinner" style="width:12px; height:12px; border-width:2px; vertical-align:middle; display:inline-block; border: 2px solid #fff; border-top: 2px solid transparent; border-radius: 50%; animation: spin 1s linear infinite; margin-right:6px;"></span> Загрузка...`;
+
+  // Load SheetJS dynamically if not already loaded
+  if (typeof XLSX === 'undefined') {
+    try {
+      await new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+        script.onload = resolve;
+        script.onerror = reject;
+        document.head.appendChild(script);
+      });
+    } catch (e) {
+      toast('Не удалось загрузить библиотеку Excel', 'error');
+      btn.disabled = false;
+      btn.innerHTML = oldText;
+      return;
+    }
+  }
+
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const data = new Uint8Array(e.target.result);
+      const workbook = XLSX.read(data, { type: 'array' });
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+      const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+      if (rows.length < 2) {
+        toast('Файл пустой или имеет неверный формат', 'error');
+        return;
+      }
+
+      const headers = rows[0].map(h => String(h || '').trim().toLowerCase());
+      
+      // Находим нужные колонки
+      const spendIdx = headers.findIndex(h => h.includes('потраченная сумма') || h.includes('spend') || h.includes('расход'));
+      const impressionsIdx = headers.findIndex(h => h.includes('показы') || h.includes('impressions') || h.includes('показ'));
+      const clicksIdx = headers.findIndex(h => h.includes('клики') || h.includes('результат') || h.includes('начата переписка') || h.includes('clicks') || h.includes('переходы'));
+
+      if (spendIdx === -1 || impressionsIdx === -1) {
+        toast('В файле не найдены колонки "Потраченная сумма" или "Показы"', 'error');
+        return;
+      }
+
+      let totalSpend = 0;
+      let totalImpressions = 0;
+      let totalClicks = 0;
+
+      // Суммируем данные по строкам
+      for (let i = 1; i < rows.length; i++) {
+        const row = rows[i];
+        if (!row || row.length === 0) continue;
+
+        totalSpend += parseFloat(row[spendIdx]) || 0;
+        totalImpressions += parseInt(row[impressionsIdx]) || 0;
+        
+        if (clicksIdx !== -1) {
+          totalClicks += parseInt(row[clicksIdx]) || 0;
+        }
+      }
+
+      // Сохраняем в кэш под текущими фильтрами
+      const startDate = document.getElementById('an-mkt-start-date').value;
+      const endDate = document.getElementById('an-mkt-end-date').value;
+      const accountId = document.getElementById('an-mkt-account-input').value.trim();
+
+      const cacheKey = `crm_mkt_cache_${startDate}_${endDate}_${accountId}`;
+      const resultObj = {
+        spend: parseFloat(totalSpend.toFixed(2)),
+        clicks: totalClicks,
+        impressions: totalImpressions
+      };
+
+      localStorage.setItem(cacheKey, JSON.stringify(resultObj));
+      toast(`Импортировано: Расход $${resultObj.spend}, Результаты: ${resultObj.clicks}, Показы: ${resultObj.impressions}`, 'success');
+      
+      renderAnalytics();
+    } catch (err) {
+      console.error(err);
+      toast(`Ошибка чтения Excel: ${err.message}`, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = oldText;
+      event.target.value = ''; // Сбросить инпут
+    }
+  };
+  reader.readAsArrayBuffer(file);
 }
 
 // ══════════════════════════════════════════════
