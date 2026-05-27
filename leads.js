@@ -44,13 +44,14 @@ async function loadLeads() {
     document.getElementById('leads-stats').innerHTML = '';
   }
   try {
-    const [leads, clients, deals, pipelines, stages, employees] = await Promise.all([
+    const [leads, clients, deals, pipelines, stages, employees, calls] = await Promise.all([
       Airtable.getAll(CONFIG.TABLES.LEADS),
       Airtable.getAll(CONFIG.TABLES.CLIENTS),
       Airtable.getAll(CONFIG.TABLES.DEALS),
       Airtable.getAll(CONFIG.TABLES.PIPELINES),
       Airtable.getAll(CONFIG.TABLES.STAGES),
-      Airtable.getAll(CONFIG.TABLES.EMPLOYEES)
+      Airtable.getAll(CONFIG.TABLES.EMPLOYEES),
+      Airtable.getAll(CONFIG.TABLES.CALLS)
     ]);
     State.leads = leads;
     State.clients = clients;
@@ -58,6 +59,7 @@ async function loadLeads() {
     State.pipelines = pipelines;
     State.stages = stages;
     State.employees = employees;
+    State.calls = calls || [];
 
     State.stages.sort((a, b) => (Number(a.fields['Порядок']) || 0) - (Number(b.fields['Порядок']) || 0));
 
@@ -1487,6 +1489,51 @@ function renderLeadMiddleColumn(lead) {
   const history = safeJsonParse(f['История'] || '[]');
   const id = lead.id;
 
+  // Ищем звонки, привязанные к этому лиду
+  const leadCalls = (State.calls || []).filter(c => {
+    const linkedIds = String(c.fields['Лиды ID'] || '').split(',').map(s => s.trim());
+    return linkedIds.includes(String(id));
+  });
+
+  let callsHtml = '';
+  if (leadCalls.length > 0) {
+    callsHtml = `
+      <div class="lead-calls-section" style="padding:12px; border-bottom:1px solid rgba(255,255,255,0.06); flex-shrink:0; background:rgba(99,102,241,0.03);">
+        <div style="font-size:11px; font-weight:800; color:#a5b4fc; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+          <span>📞 Разборы звонков ИИ (${leadCalls.length})</span>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:6px; max-height: 180px; overflow-y: auto;">
+          ${leadCalls.map(c => {
+            const score = Number(c.fields['Оценка']) || 0;
+            let scoreColor = '#ef4444';
+            let scoreBg = 'rgba(239, 68, 68, 0.15)';
+            if (score >= 6) {
+              scoreColor = '#10b981';
+              scoreBg = 'rgba(16, 185, 129, 0.15)';
+            } else if (score >= 4) {
+              scoreColor = '#f59e0b';
+              scoreBg = 'rgba(245, 158, 11, 0.15)';
+            }
+            
+            return `
+              <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); border-radius:10px; padding:10px 12px; display:flex; justify-content:space-between; align-items:center; gap:12px;">
+                <div style="flex:1; min-width:0;">
+                  <div style="font-size:12px; font-weight:700; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escHtml(c.fields['Имя'] || 'Звонок')}</div>
+                  <div style="font-size:11px; color:var(--text3); margin-top:2px;">Дата: ${c.fields['Дата'] || '—'} | Менеджер: ${escHtml(c.fields['Менеджер'] || '—')}</div>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
+                  <span style="font-size:11px; font-weight:800; color:${scoreColor}; background:${scoreBg}; padding:2px 8px; border-radius:12px;">${score}/7</span>
+                  ${c.fields['Ссылка на запись'] ? `<a href="${c.fields['Ссылка на запись']}" target="_blank" rel="noopener" class="btn btn-secondary btn-compact" style="padding:0 !important; width:28px; height:28px; display:flex; align-items:center; justify-content:center; text-decoration:none;" title="Открыть запись">🎥</a>` : ''}
+                  <button class="btn btn-primary btn-compact" onclick="openCallAuditDetailsModal('${c.id}')" style="padding:0 !important; width:28px; height:28px; display:flex; align-items:center; justify-content:center;" title="Открыть аудит ИИ">📝</button>
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    `;
+  }
+
   // Active user selection
   const currentUser = localStorage.getItem('crm_current_user') || '';
   const empOptions = State.employees.map(e => {
@@ -1609,6 +1656,8 @@ function renderLeadMiddleColumn(lead) {
           </div>
         </div>
       </div>
+
+      ${callsHtml}
 
       <!-- Scrolling timeline section -->
       <div style="flex:1; overflow-y:auto; padding:12px; display:flex; flex-direction:column; gap:8px;" id="lead-timeline-scroller">
@@ -4094,5 +4143,96 @@ window.openContactLaterModal = openContactLaterModal;
 window.cancelContactLater = cancelContactLater;
 window.confirmContactLater = confirmContactLater;
 window.openQuickTaskModal = openQuickTaskModal;
+
+// ─── Отображение подробного разбора звонка ИИ в модале
+function openCallAuditDetailsModal(callId) {
+  const call = (State.calls || []).find(c => String(c.id) === String(callId));
+  if (!call) {
+    toast('Звонок не найден', 'error');
+    return;
+  }
+  const f = call.fields || {};
+  const score = Number(f['Оценка']) || 0;
+  let scoreColor = '#ef4444';
+  let scoreBg = 'rgba(239, 68, 68, 0.15)';
+  if (score >= 6) {
+    scoreColor = '#10b981';
+    scoreBg = 'rgba(16, 185, 129, 0.15)';
+  } else if (score >= 4) {
+    scoreColor = '#f59e0b';
+    scoreBg = 'rgba(245, 158, 11, 0.15)';
+  }
+
+  const container = document.getElementById('call-audit-drawer-content');
+  if (!container) return;
+
+  // Преобразуем переносы строк и базовый markdown в HTML для красивого вывода аудита
+  let auditHtml = String(f['Аудит'] || 'Разбор ИИ отсутствует.').trim();
+  auditHtml = auditHtml
+    .replace(/\r?\n/g, '<br>')
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+    .replace(/-\s+/g, '&bull; ');
+
+  // Форматируем транскрипт
+  let transcriptHtml = String(f['Транскрипт'] || 'Транскрипт отсутствует.').trim();
+  transcriptHtml = transcriptHtml
+    .replace(/\r?\n/g, '<br>')
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+
+  container.innerHTML = `
+    <div class="card" style="margin-bottom:16px; border-color:var(--border); padding:16px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:12px;">
+        <div>
+          <h4 style="margin:0; font-size:16px; font-weight:800; color:#fff;">${escHtml(f['Имя'] || 'Звонок')}</h4>
+          <div style="font-size:12px; color:var(--text3); margin-top:4px;">
+            Дата: <strong>${f['Дата'] || '—'}</strong> | 
+            Менеджер: <strong>${escHtml(f['Менеджер'] || '—')}</strong>
+          </div>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="font-size:14px; font-weight:800; color:${scoreColor}; background:${scoreBg}; padding:4px 12px; border-radius:16px; border: 1px solid ${scoreColor}40;">
+            Оценка РОПа: ${score}/7
+          </span>
+          ${f['Ссылка на запись'] ? `<a href="${f['Ссылка на запись']}" target="_blank" rel="noopener" class="btn btn-primary" style="margin:0; font-size:12px; display:inline-flex; align-items:center; gap:6px; text-decoration:none;">🎥 Запись</a>` : ''}
+        </div>
+      </div>
+    </div>
+
+    <!-- AI Review Details -->
+    <div style="background:rgba(99,102,241,0.03); border:1px solid rgba(99,102,241,0.15); border-radius:12px; padding:16px; margin-bottom:16px;">
+      <h5 style="margin-top:0; margin-bottom:12px; font-size:14px; font-weight:800; color:#a5b4fc; display:flex; align-items:center; gap:6px;">🤖 ИИ-Разбор и Рекомендации</h5>
+      <div style="font-size:13px; color:#fff; line-height:1.6; word-break:break-word;">
+        ${auditHtml}
+      </div>
+    </div>
+
+    <!-- Transcript Accordion -->
+    <div style="border:1px solid var(--border); border-radius:12px; overflow:hidden;">
+      <button onclick="toggleCallTranscriptCollapse()" style="width:100%; text-align:left; background:rgba(255,255,255,0.02); border:none; color:#fff; padding:14px 16px; font-size:13px; font-weight:700; cursor:pointer; display:flex; justify-content:space-between; align-items:center;">
+        <span>📜 Расшифровка разговора (Транскрипт)</span>
+        <span id="call-transcript-collapse-icon">▼</span>
+      </button>
+      <div id="call-transcript-collapse-body" style="display:none; padding:16px; border-top:1px solid var(--border); max-height:350px; overflow-y:auto; background:rgba(0,0,0,0.1); font-size:12px; color:var(--text2); line-height:1.5; font-family:monospace;">
+        ${transcriptHtml}
+      </div>
+    </div>
+  `;
+
+  openDrawer('drawer-call-audit');
+}
+
+function toggleCallTranscriptCollapse() {
+  const body = document.getElementById('call-transcript-collapse-body');
+  const icon = document.getElementById('call-transcript-collapse-icon');
+  if (body && icon) {
+    const isCollapsed = (body.style.display === 'none');
+    body.style.display = isCollapsed ? 'block' : 'none';
+    icon.textContent = isCollapsed ? '▲' : '▼';
+  }
+}
+
+window.openCallAuditDetailsModal = openCallAuditDetailsModal;
+window.toggleCallTranscriptCollapse = toggleCallTranscriptCollapse;
 
 

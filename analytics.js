@@ -2,13 +2,14 @@
 async function loadAnalytics() {
   spinner('analytics-content');
   try {
-    const [leads, deals, tariffs, services, employees, marketing] = await Promise.all([
+    const [leads, deals, tariffs, services, employees, marketing, calls] = await Promise.all([
       Airtable.getAll(CONFIG.TABLES.LEADS),
       Airtable.getAll(CONFIG.TABLES.DEALS),
       Airtable.getAll(CONFIG.TABLES.TARIFFS),
       Airtable.getAll(CONFIG.TABLES.SERVICES),
       Airtable.getAll(CONFIG.TABLES.EMPLOYEES),
       Airtable.getAll(CONFIG.TABLES.MARKETING),
+      Airtable.getAll(CONFIG.TABLES.CALLS),
     ]);
     State.leads = leads;
     State.deals = deals;
@@ -16,6 +17,7 @@ async function loadAnalytics() {
     State.services = services;
     State.employees = employees;
     State.marketing = marketing || [];
+    State.calls = calls || [];
     renderAnalytics();
   } catch(e) {
     document.getElementById('analytics-content').innerHTML =
@@ -165,6 +167,7 @@ function renderAnalytics() {
     {key:'refunds',  label:'↩️ Возвраты'},
     {key:'economics', label:'💰 Юнит-экономика'},
     {key:'marketing', label:'📣 Маркетинг'},
+    {key:'calls',     label:'📞 Звонки'},
   ];
   const tabHtml = tabs.map(t =>
     `<button class="an-tab ${AnState.tab===t.key?'active':''}" onclick="anSetTab('${t.key}')">${t.label}</button>`
@@ -307,6 +310,48 @@ function renderAnalytics() {
         </div>
       </div>
     `;
+  } else if (AnState.tab === 'calls') {
+    if (!AnState.callsStartDate || !AnState.callsEndDate) {
+      const now = new Date();
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      AnState.callsStartDate = getLocalDateString(startOfMonth);
+      AnState.callsEndDate = getLocalDateString(endOfMonth);
+      AnState.callsManager = '';
+    }
+    
+    const managerOptions = (State.employees || []).map(e => {
+      const name = e.fields['Имя'] || '';
+      return `<option value="${escHtml(name)}" ${AnState.callsManager === name ? 'selected' : ''}>${escHtml(name)}</option>`;
+    }).join('');
+
+    filtersHtml = `
+      <div class="an-filters-container">
+        <div class="an-filters-row" style="gap:16px; align-items:flex-end; flex-wrap:wrap;">
+          <div class="an-filter-group">
+            <span class="an-filter-label">Дата с</span>
+            <input type="date" id="an-calls-start-date" class="an-filter-date-input" onclick="try{this.showPicker()}catch(e){}" value="${AnState.callsStartDate}" style="height:36px; padding:0 12px; border-radius:10px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:#fff; font-weight:700; cursor:pointer;">
+          </div>
+          
+          <div class="an-filter-group">
+            <span class="an-filter-label">Дата по</span>
+            <input type="date" id="an-calls-end-date" class="an-filter-date-input" onclick="try{this.showPicker()}catch(e){}" value="${AnState.callsEndDate}" style="height:36px; padding:0 12px; border-radius:10px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:#fff; font-weight:700; cursor:pointer;">
+          </div>
+
+          <div class="an-filter-group">
+            <span class="an-filter-label">Менеджер</span>
+            <select id="an-calls-manager" style="height:36px; padding:0 12px; border-radius:10px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:#fff; font-weight:700; cursor:pointer;">
+              <option value="">Все менеджеры</option>
+              ${managerOptions}
+            </select>
+          </div>
+          
+          <div style="display:flex; gap:8px;">
+            <button class="an-date-btn" onclick="anApplyCallsFilters()" style="height:36px; margin:0; line-height:36px; padding:0 16px;">Сформировать</button>
+          </div>
+        </div>
+      </div>
+    `;
   } else {
     filtersHtml = `
       <div class="an-filters-container">
@@ -362,6 +407,8 @@ function renderAnTab() {
     body.innerHTML = renderTabDaily();
   } else if (AnState.tab === 'marketing') {
     body.innerHTML = renderTabMarketing();
+  } else if (AnState.tab === 'calls') {
+    body.innerHTML = renderTabCalls();
   }
 }
 
@@ -2303,4 +2350,129 @@ const MSG_TEMPLATES = [
 
 // Хранит массив ID лидов, ожидающих перевода в «Не целевой»
 let _nonTargetPendingIds = [];
+
+// ─── Обработка фильтров звонков
+function anApplyCallsFilters() {
+  const startVal = document.getElementById('an-calls-start-date').value;
+  const endVal = document.getElementById('an-calls-end-date').value;
+  const managerVal = document.getElementById('an-calls-manager').value;
+
+  if (!startVal || !endVal) {
+    toast('Выберите диапазон дат', 'error');
+    return;
+  }
+
+  AnState.callsStartDate = startVal;
+  AnState.callsEndDate = endVal;
+  AnState.callsManager = managerVal;
+
+  renderAnalytics();
+}
+
+// ─── Отрисовка вкладки звонков
+function renderTabCalls() {
+  const calls = State.calls || [];
+  
+  // Фильтруем звонки
+  const filtered = calls.filter(c => {
+    const fields = c.fields || {};
+    const dateStr = fields['Дата'];
+    const mgr = fields['Менеджер'] || '';
+    
+    if (AnState.callsManager && mgr !== AnState.callsManager) {
+      return false;
+    }
+    
+    if (!isDateInRange(dateStr, AnState.callsStartDate, AnState.callsEndDate)) {
+      return false;
+    }
+    
+    return true;
+  });
+
+  // Сортируем по убыванию даты
+  filtered.sort((a, b) => {
+    const da = a.fields['Дата'] || '';
+    const db = b.fields['Дата'] || '';
+    return db.localeCompare(da);
+  });
+
+  if (filtered.length === 0) {
+    return `<div class="an-empty">⚠️ За выбранный период звонков не найдено.</div>`;
+  }
+
+  // Рендерим строки таблицы
+  const rowsHtml = filtered.map(c => {
+    const f = c.fields || {};
+    const score = Number(f['Оценка']) || 0;
+    
+    let scoreColor = '#ef4444';
+    let scoreBg = 'rgba(239, 68, 68, 0.15)';
+    if (score >= 6) {
+      scoreColor = '#10b981';
+      scoreBg = 'rgba(16, 185, 129, 0.15)';
+    } else if (score >= 4) {
+      scoreColor = '#f59e0b';
+      scoreBg = 'rgba(245, 158, 11, 0.15)';
+    }
+
+    const leadName = f['Лиды'] || '—';
+    const leadId = f['Лиды ID'] || '';
+
+    const recButton = f['Ссылка на запись'] 
+      ? `<a href="${f['Ссылка на запись']}" target="_blank" rel="noopener" class="btn btn-secondary btn-compact" style="text-decoration:none;" title="Открыть запись">🎥 Запись</a>` 
+      : `<span style="color:var(--text3); font-size:12px;">Нет записи</span>`;
+
+    const reviewButton = `<button class="btn btn-primary btn-compact" onclick="openCallAuditDetailsModal('${c.id}')">📝 Разбор ИИ</button>`;
+
+    let leadLinkHtml = escHtml(leadName);
+    if (leadId) {
+      const leadObj = State.leads.find(l => String(l.id) === String(leadId).split(',')[0].trim());
+      const actualStage = leadObj ? (leadObj.fields['Воронка'] || leadObj.fields['Status'] || '') : '';
+      leadLinkHtml = `<a href="#" onclick="event.preventDefault(); openLeadDetail('${leadId.split(',')[0].trim()}', '${escHtml(actualStage)}')" style="color:#a5b4fc; font-weight:700; text-decoration:underline;">${escHtml(leadName)}</a>`;
+    }
+
+    return `
+      <tr>
+        <td style="font-weight:700;">${f['Дата'] || '—'}</td>
+        <td>${leadLinkHtml}</td>
+        <td>${escHtml(f['Менеджер'] || '—')}</td>
+        <td>
+          <span style="font-weight:800; color:${scoreColor}; background:${scoreBg}; padding:2px 8px; border-radius:12px; border: 1px solid ${scoreColor}30;">
+            ${score}/7
+          </span>
+        </td>
+        <td>
+          <div style="display:flex; gap:8px; align-items:center;">
+            ${recButton}
+            ${reviewButton}
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  return `
+    <div class="an-daily-table-container" style="background:rgba(255,255,255,0.01); border:1px solid rgba(255,255,255,0.05); border-radius:16px; padding:20px; box-sizing:border-box;">
+      <h3 style="margin-top:0; margin-bottom:16px; font-size:16px; font-weight:700; color:#fff; display:flex; align-items:center; gap:8px;">📞 Список проанализированных звонков (${filtered.length})</h3>
+      <table class="an-daily-table">
+        <thead>
+          <tr>
+            <th>Дата звонка</th>
+            <th>Клиент (Лид)</th>
+            <th>Менеджер</th>
+            <th>Оценка ИИ</th>
+            <th>Действия</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rowsHtml}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+window.anApplyCallsFilters = anApplyCallsFilters;
+window.renderTabCalls = renderTabCalls;
 

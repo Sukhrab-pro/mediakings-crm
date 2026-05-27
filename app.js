@@ -1,7 +1,7 @@
 // === ERP CORE INITIALIZATION & UTILITIES ===
 // ─── State
 const State = {
-  leads: [], clients: [], deals: [], employees: [], tariffs: [], operations: [],
+  leads: [], clients: [], deals: [], employees: [], tariffs: [], operations: [], calls: [],
   pipelines: [], stages: [],
   currentPipelineId: localStorage.getItem('currentPipelineId') || null,
   currentPage: 'leads',

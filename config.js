@@ -26,7 +26,8 @@ const CONFIG = {
     FINANCE_ACCOUNTS:   992641,
     FINANCE_INCOMES:    992642,
     FINANCE_EXPENSES:   992643,
-    MARKETING:          994899
+    MARKETING:          994899,
+    CALLS:              997431
   },
 
   // CRM поля (после нормализации)
