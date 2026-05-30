@@ -376,6 +376,285 @@ async function savePipelineSettings() {
 }
 
 // ════════════════════════════════════════════════════
+// ADMIN PAGES — Сотрудники, Тарифы, Услуги, Калькулятор, Партнеры
+// ════════════════════════════════════════════════════
+
+// ─── Сотрудники ───
+async function loadAdminEmployees() {
+  const el = document.getElementById('employees-content');
+  if (!el) return;
+  el.innerHTML = `<div class="loading-state"><div class="spinner"></div></div>`;
+  try {
+    const rows = await Airtable.getAll(CONFIG.TABLES.EMPLOYEES);
+    State.employees = rows;
+    el.innerHTML = `
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
+        <h2 style="margin:0; font-size:20px; font-weight:800;">👤 Сотрудники</h2>
+        <button class="btn btn-primary" onclick="openDrawer('drawer-employee-add')">+ Добавить</button>
+      </div>
+      <div class="admin-table-wrap">
+        <table class="admin-table">
+          <thead><tr>
+            <th>Имя</th><th>Email</th><th>Роль / Должность</th><th>Телефон</th><th>Действия</th>
+          </tr></thead>
+          <tbody>
+            ${rows.map(r => {
+              const f = r.fields;
+              return `<tr>
+                <td><strong>${escHtml(f['Имя']||'—')}</strong></td>
+                <td style="color:var(--text2)">${escHtml(f['Email']||f['Почта']||'—')}</td>
+                <td>${escHtml(f['Должность']||f['Роль']||'—')}</td>
+                <td>${escHtml(f['Телефон']||'—')}</td>
+                <td>
+                  <button class="btn btn-secondary btn-compact" onclick="openAdminEmployeeEdit('${r.id}')">✏️ Редактировать</button>
+                </td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  } catch(e) { el.innerHTML = `<div class="empty-state">Ошибка загрузки: ${escHtml(e.message)}</div>`; }
+}
+
+// ─── Тарифы ───
+async function loadAdminTariffs() {
+  const el = document.getElementById('tariffs-content');
+  if (!el) return;
+  el.innerHTML = `<div class="loading-state"><div class="spinner"></div></div>`;
+  try {
+    const rows = await Airtable.getAll(CONFIG.TABLES.TARIFFS);
+    State.tariffs = rows;
+    el.innerHTML = `
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
+        <h2 style="margin:0; font-size:20px; font-weight:800;">🏷️ Тарифы</h2>
+        <button class="btn btn-primary" onclick="openAdminTariffAdd()">+ Добавить тариф</button>
+      </div>
+      <div class="admin-table-wrap">
+        <table class="admin-table">
+          <thead><tr>
+            <th>Название</th><th>Стоимость</th><th>Сценариев</th><th>Снято</th><th>Смонтировано</th><th>Сторис</th><th>Действия</th>
+          </tr></thead>
+          <tbody>
+            ${rows.map(r => {
+              const f = r.fields;
+              return `<tr>
+                <td><strong>${escHtml(f['Название']||'—')}</strong></td>
+                <td style="color:#34d399; font-weight:700">${Number(f['Стоимость']||0).toLocaleString('ru-RU')} ₸</td>
+                <td style="color:var(--text2)">${f['Сценариев']||0}</td>
+                <td style="color:var(--text2)">${f['Снято']||0}</td>
+                <td style="color:var(--text2)">${f['Смонтировано']||0}</td>
+                <td style="color:var(--text2)">${f['Сторис']||0}</td>
+                <td>
+                  <button class="btn btn-secondary btn-compact" onclick="openAdminTariffEdit('${r.id}')">✏️</button>
+                  <button class="btn btn-danger btn-compact" onclick="deleteAdminTariff('${r.id}')">🗑</button>
+                </td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  } catch(e) { el.innerHTML = `<div class="empty-state">Ошибка загрузки: ${escHtml(e.message)}</div>`; }
+}
+
+// ─── Цены на услуги ───
+async function loadAdminServices() {
+  const el = document.getElementById('services-content');
+  if (!el) return;
+  el.innerHTML = `<div class="loading-state"><div class="spinner"></div></div>`;
+  try {
+    const rows = await Airtable.getAll(CONFIG.TABLES.SERVICES);
+    State.services = rows;
+    el.innerHTML = `
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
+        <h2 style="margin:0; font-size:20px; font-weight:800;">💲 Цены на услуги</h2>
+        <button class="btn btn-primary" onclick="openAdminServiceAdd()">+ Добавить услугу</button>
+      </div>
+      <div class="admin-table-wrap">
+        <table class="admin-table">
+          <thead><tr>
+            <th>Название услуги</th><th>Цена продажи</th><th>Себестоимость</th><th>Единица</th><th>Действия</th>
+          </tr></thead>
+          <tbody>
+            ${rows.map(r => {
+              const f = r.fields;
+              return `<tr>
+                <td><strong>${escHtml(f['Название услуги']||f['Название']||'—')}</strong></td>
+                <td style="color:#34d399; font-weight:700">${Number(f['Цена продажи']||0).toLocaleString('ru-RU')} ₸</td>
+                <td style="color:#f59e0b">${Number(f['Себестоимость']||0).toLocaleString('ru-RU')} ₸</td>
+                <td style="color:var(--text2)">${escHtml(f['Единица']||'шт')}</td>
+                <td>
+                  <button class="btn btn-secondary btn-compact" onclick="openAdminServiceEdit('${r.id}')">✏️</button>
+                </td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  } catch(e) { el.innerHTML = `<div class="empty-state">Ошибка загрузки: ${escHtml(e.message)}</div>`; }
+}
+
+// ─── Калькулятор тарифов ───
+async function loadAdminCalculator() {
+  const el = document.getElementById('calculator-content');
+  if (!el) return;
+  if (State.services.length === 0) {
+    try { State.services = await Airtable.getAll(CONFIG.TABLES.SERVICES); } catch(e) {}
+  }
+  const services = State.services;
+
+  el.innerHTML = `
+    <h2 style="margin:0 0 20px; font-size:20px; font-weight:800;">🧮 Калькулятор стоимости тарифа</h2>
+    <div class="card" style="max-width:600px;">
+      <div style="display:flex; flex-direction:column; gap:12px; margin-bottom:16px;">
+        ${services.map(s => {
+          const f = s.fields;
+          const name = escHtml(f['Название услуги']||f['Название']||'');
+          const sale = Number(f['Цена продажи']||0);
+          const sebes = Number(f['Себестоимость']||0);
+          const unit = escHtml(f['Единица']||'шт');
+          return `
+            <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+              <div style="flex:1; min-width:140px; font-size:13px; font-weight:600;">${name}</div>
+              <div style="color:var(--text2); font-size:11px; width:90px;">${sale.toLocaleString('ru-RU')} ₸/${unit}</div>
+              <input type="number" min="0" placeholder="0" data-service="${s.id}" data-sale="${sale}" data-sebes="${sebes}"
+                class="form-input compact-input calc-qty" style="width:80px;" oninput="calcUpdateTotal()"/>
+              <div style="color:var(--text2); font-size:12px; width:100px; text-align:right;" id="calc-line-${s.id}">— ₸</div>
+            </div>`;
+        }).join('')}
+      </div>
+      <div style="border-top:1px solid rgba(255,255,255,0.08); padding-top:14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+        <div>
+          <div style="font-size:12px; color:var(--text2); margin-bottom:2px;">Цена продажи</div>
+          <div id="calc-total-sale" style="font-size:22px; font-weight:800; color:#34d399;">0 ₸</div>
+        </div>
+        <div>
+          <div style="font-size:12px; color:var(--text2); margin-bottom:2px;">Себестоимость</div>
+          <div id="calc-total-sebes" style="font-size:18px; font-weight:700; color:#f59e0b;">0 ₸</div>
+        </div>
+        <div>
+          <div style="font-size:12px; color:var(--text2); margin-bottom:2px;">Маржа</div>
+          <div id="calc-total-margin" style="font-size:18px; font-weight:700; color:#a5b4fc;">0 ₸</div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function calcUpdateTotal() {
+  let totalSale = 0, totalSebes = 0;
+  document.querySelectorAll('.calc-qty').forEach(input => {
+    const qty = Number(input.value) || 0;
+    const sale = Number(input.dataset.sale) || 0;
+    const sebes = Number(input.dataset.sebes) || 0;
+    const sid = input.dataset.service;
+    const lineSale = qty * sale;
+    const lineSebes = qty * sebes;
+    totalSale += lineSale;
+    totalSebes += lineSebes;
+    const lineEl = document.getElementById('calc-line-' + sid);
+    if (lineEl) lineEl.textContent = qty > 0 ? lineSale.toLocaleString('ru-RU') + ' ₸' : '— ₸';
+  });
+  const margin = totalSale - totalSebes;
+  const fmt = n => n.toLocaleString('ru-RU') + ' ₸';
+  document.getElementById('calc-total-sale').textContent   = fmt(totalSale);
+  document.getElementById('calc-total-sebes').textContent = fmt(totalSebes);
+  document.getElementById('calc-total-margin').textContent = fmt(margin);
+}
+window.calcUpdateTotal = calcUpdateTotal;
+
+// ─── Партнеры ───
+async function loadAdminPartners() {
+  const el = document.getElementById('partners-content');
+  if (!el) return;
+  if (typeof loadPartners === 'function') loadPartners();
+  const partners = JSON.parse(localStorage.getItem('crm_partners') || '["Абдулла","Дарина","Сухраб"]');
+
+  el.innerHTML = `
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
+      <h2 style="margin:0; font-size:20px; font-weight:800;">🤝 Партнеры</h2>
+    </div>
+    <div class="card" style="max-width:480px;">
+      <div id="admin-partners-list" style="display:flex; flex-direction:column; gap:8px; margin-bottom:16px;">
+        ${partners.map(p => `
+          <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; background:rgba(255,255,255,0.04); border-radius:10px;">
+            <span style="font-weight:600;">${escHtml(p)}</span>
+            <button class="btn btn-danger btn-compact" onclick="adminDeletePartner('${escHtml(p)}')">Удалить</button>
+          </div>`).join('')}
+      </div>
+      <div style="display:flex; gap:8px;">
+        <input id="admin-new-partner" class="form-input compact-input" placeholder="Имя нового партнера" style="flex:1"/>
+        <button class="btn btn-primary" onclick="adminAddPartner()">Добавить</button>
+      </div>
+    </div>`;
+}
+
+function adminAddPartner() {
+  const input = document.getElementById('admin-new-partner');
+  const name = (input?.value || '').trim();
+  if (!name) return;
+  const partners = JSON.parse(localStorage.getItem('crm_partners') || '["Абдулла","Дарина","Сухраб"]');
+  if (!partners.includes(name)) { partners.push(name); localStorage.setItem('crm_partners', JSON.stringify(partners)); }
+  if (typeof loadPartners === 'function') loadPartners();
+  if (typeof populatePartnersDropdown === 'function') populatePartnersDropdown();
+  loadAdminPartners();
+}
+function adminDeletePartner(name) {
+  let partners = JSON.parse(localStorage.getItem('crm_partners') || '["Абдулла","Дарина","Сухраб"]');
+  partners = partners.filter(p => p !== name);
+  localStorage.setItem('crm_partners', JSON.stringify(partners));
+  if (typeof loadPartners === 'function') loadPartners();
+  if (typeof populatePartnersDropdown === 'function') populatePartnersDropdown();
+  loadAdminPartners();
+}
+window.adminAddPartner = adminAddPartner;
+window.adminDeletePartner = adminDeletePartner;
+
+// ─── Stubs for employee/tariff/service edit (full drawers can be added later) ───
+function openAdminEmployeeEdit(id) { toast('Редактирование через карточку Baserow — скоро здесь появится форма', 'info'); }
+function openAdminTariffEdit(id) {
+  const t = State.tariffs.find(r => r.id === id); if (!t) return;
+  const f = t.fields;
+  const name = prompt('Название тарифа:', f['Название'] || '');
+  if (name === null) return;
+  const cost = prompt('Стоимость (₸):', f['Стоимость'] || '0');
+  if (cost === null) return;
+  Airtable.update(CONFIG.TABLES.TARIFFS, id, { 'Название': name.trim(), 'Стоимость': Number(cost) })
+    .then(() => { toast('Тариф обновлён ✓'); loadAdminTariffs(); })
+    .catch(e => toast('Ошибка: ' + e.message, 'error'));
+}
+function openAdminTariffAdd() {
+  const name = prompt('Название нового тарифа:');
+  if (!name?.trim()) return;
+  const cost = prompt('Стоимость (₸):', '0');
+  Airtable.create(CONFIG.TABLES.TARIFFS, { 'Название': name.trim(), 'Стоимость': Number(cost || 0) })
+    .then(() => { toast('Тариф создан ✓'); loadAdminTariffs(); })
+    .catch(e => toast('Ошибка: ' + e.message, 'error'));
+}
+function deleteAdminTariff(id) {
+  if (!confirm('Удалить тариф? Это действие нельзя отменить.')) return;
+  Airtable.remove(CONFIG.TABLES.TARIFFS, id)
+    .then(() => { toast('Тариф удалён'); loadAdminTariffs(); })
+    .catch(e => toast('Ошибка: ' + e.message, 'error'));
+}
+function openAdminServiceEdit(id) {
+  const s = State.services.find(r => r.id === id); if (!s) return;
+  const f = s.fields;
+  const sale = prompt('Цена продажи (₸):', f['Цена продажи'] || '0');
+  if (sale === null) return;
+  const sebes = prompt('Себестоимость (₸):', f['Себестоимость'] || '0');
+  if (sebes === null) return;
+  Airtable.update(CONFIG.TABLES.SERVICES, id, { 'Цена продажи': Number(sale), 'Себестоимость': Number(sebes) })
+    .then(() => { toast('Услуга обновлена ✓'); loadAdminServices(); })
+    .catch(e => toast('Ошибка: ' + e.message, 'error'));
+}
+function openAdminServiceAdd() { toast('Добавление услуг — скоро', 'info'); }
+window.openAdminEmployeeEdit = openAdminEmployeeEdit;
+window.openAdminTariffEdit   = openAdminTariffEdit;
+window.openAdminTariffAdd    = openAdminTariffAdd;
+window.deleteAdminTariff     = deleteAdminTariff;
+window.openAdminServiceEdit  = openAdminServiceEdit;
+window.openAdminServiceAdd   = openAdminServiceAdd;
+
+// ════════════════════════════════════════════════════
 // CHARTS — инициализация графиков аналитики
 // ════════════════════════════════════════════════════
 

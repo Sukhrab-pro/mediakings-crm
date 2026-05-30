@@ -144,19 +144,31 @@ function setColumnSort(stageKey, sortType) {
   renderKanban(State.leads);
 }
 
+// ─── Sidebar toggle
+function toggleSidebar() {
+  const sidebar = document.getElementById('main-sidebar');
+  if (!sidebar) return;
+  sidebar.classList.toggle('collapsed');
+  localStorage.setItem('sidebar_collapsed', sidebar.classList.contains('collapsed') ? '1' : '0');
+}
+function initSidebar() {
+  const sidebar = document.getElementById('main-sidebar');
+  if (!sidebar) return;
+  if (localStorage.getItem('sidebar_collapsed') === '1') sidebar.classList.add('collapsed');
+}
+
 // ─── Router
 function navigate(page) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-  document.getElementById('page-' + page).classList.add('active');
-  document.querySelector(`[data-page="${page}"]`).classList.add('active');
+  const pageEl = document.getElementById('page-' + page);
+  if (pageEl) pageEl.classList.add('active');
+  document.querySelectorAll(`[data-page="${page}"]`).forEach(n => n.classList.add('active'));
   State.currentPage = page;
   // Обновляем заголовок мобильной шапки
   const titleEl = document.getElementById('mobile-topbar-title');
   if (titleEl) titleEl.textContent = _MOBILE_PAGE_TITLES[page] || page;
-  // Скрываем кнопку "Назад" при переходе между страницами
   updateMobileBar();
-  // Автообновление только на странице лидов
   if (page === 'leads') startAutoRefresh();
   else stopAutoRefresh();
   loadPage(page);
@@ -169,6 +181,11 @@ async function loadPage(page) {
   if (page === 'finance')    await loadFinance();
   if (page === 'calendar')   await loadCalendarPage();
   if (page === 'analytics')  await loadAnalytics();
+  if (page === 'employees')  await loadAdminEmployees();
+  if (page === 'tariffs')    await loadAdminTariffs();
+  if (page === 'services')   await loadAdminServices();
+  if (page === 'calculator') await loadAdminCalculator();
+  if (page === 'partners')   await loadAdminPartners();
 }
 
 // ─── Toast / Loading
@@ -190,7 +207,9 @@ function spinner(id) {
 // ─── Mobile top bar helpers
 const _MOBILE_PAGE_TITLES = {
   leads: '🎯 Лиды', clients: '👥 Клиенты', deals: '📁 Проекты',
-  operations: '📋 Операции', finance: '💰 Финансы', calendar: '📅 Календарь', analytics: '📊 Отчёты'
+  operations: '📋 Операции', finance: '💰 Финансы', calendar: '📅 Календарь',
+  analytics: '📊 Отчёты', employees: '👤 Сотрудники', tariffs: '🏷️ Тарифы',
+  services: '💲 Цены на услуги', calculator: '🧮 Калькулятор', partners: '🤝 Партнеры'
 };
 
 function updateMobileBar() {
@@ -212,45 +231,32 @@ function mobileGoBack() {
 function openDrawer(id) {
   document.getElementById(id).classList.add('open');
   if(id==='drawer-lead') { populateLeadStageSelect(); populateEmployeeSelect('l-manager'); }
-  if(id==='drawer-deal') { populateClientSelect(); populateTariffSelect('d-tariff'); populateEmployeeSelect('d-employee'); }
+  if(id==='drawer-deal') { populateClientSelect(); populateTariffSelect('d-tariff'); populateEmployeeSelect('d-project'); }
   if(id==='drawer-operation'){populateDealSelect('op-deal');populateEmployeeSelect('op-employee');}
   updateMobileBar();
 }
 function closeDrawer(id) {
   document.getElementById(id).classList.remove('open');
   updateMobileBar();
+  
+  if (id === 'drawer-client' && window.State && State.uniClientCallbackActive) {
+    State.uniClientCallbackActive = false;
+    openDrawer('drawer-operation-unified');
+  }
+  if (id === 'drawer-deal' && window.State && State.uniDealCallbackActive) {
+    State.uniDealCallbackActive = false;
+    openDrawer('drawer-operation-unified');
+  }
 }
-document.querySelectorAll('.overlay').forEach(o=>o.addEventListener('click',e=>{if(e.target===o)o.classList.remove('open');}));
+document.querySelectorAll('.overlay').forEach(o=>o.addEventListener('click',e=>{if(e.target===o)closeDrawer(o.id);}));
 
 function fabAction(){
   const p = State.currentPage;
   if(p==='leads')     { openDrawer('drawer-lead'); return; }
-  if(p==='clients')   { openDrawer('drawer-client'); return; }
+  if(p==='clients')   { if(window.prepareClientDrawer) window.prepareClientDrawer(); openDrawer('drawer-client'); return; }
   if(p==='deals')     { openDrawer('drawer-deal'); return; }
   if(p==='operations'){ openDrawer('drawer-operation'); return; }
-  if(p==='finance')   { toggleFabFinanceMenu(); return; }
-}
-
-window._fabFinanceOpen = false;
-function toggleFabFinanceMenu() {
-  const menu = document.getElementById('fab-finance-menu');
-  if (!menu) return;
-  window._fabFinanceOpen = !window._fabFinanceOpen;
-  menu.style.display = window._fabFinanceOpen ? 'flex' : 'none';
-}
-function fabFinanceIncome() {
-  window._fabFinanceOpen = false;
-  const fm = document.getElementById('fab-finance-menu');
-  if (fm) fm.style.display = 'none';
-  if (typeof prepareIncomeDrawer === 'function') prepareIncomeDrawer();
-  openDrawer('drawer-income');
-}
-function fabFinanceExpense() {
-  window._fabFinanceOpen = false;
-  const fm = document.getElementById('fab-finance-menu');
-  if (fm) fm.style.display = 'none';
-  if (typeof prepareExpenseDrawer === 'function') prepareExpenseDrawer();
-  openDrawer('drawer-expense');
+  if(p==='finance')   { openAddOperationMenu(); return; }
 }
 
 function statusBadge(status){
@@ -782,6 +788,7 @@ window.markAllTasksAsRead = markAllTasksAsRead;
 window.startDueTasksChecker = startDueTasksChecker;
 
 initApp();
+initSidebar();
 
 
 
