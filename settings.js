@@ -387,36 +387,175 @@ async function loadAdminEmployees() {
   try {
     const rows = await Airtable.getAll(CONFIG.TABLES.EMPLOYEES);
     State.employees = rows;
-    el.innerHTML = `
-      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
-        <h2 style="margin:0; font-size:20px; font-weight:800;">👤 Сотрудники</h2>
-        <button class="btn btn-primary" onclick="openDrawer('drawer-employee-add')">+ Добавить</button>
-      </div>
-      <div class="admin-table-wrap">
-        <table class="admin-table">
-          <thead><tr>
-            <th>Имя</th><th>Email</th><th>Роль / Должность</th><th>Телефон</th><th>Действия</th>
-          </tr></thead>
-          <tbody>
-            ${rows.map(r => {
-              const f = r.fields;
-              return `<tr>
-                <td><strong>${escHtml(f['Имя']||'—')}</strong></td>
-                <td style="color:var(--text2)">${escHtml(f['Email']||f['Почта']||'—')}</td>
-                <td>${escHtml(f['Должность']||f['Роль']||'—')}</td>
-                <td>${escHtml(f['Телефон']||'—')}</td>
-                <td>
-                  <button class="btn btn-secondary btn-compact" onclick="openAdminEmployeeEdit('${r.id}')">✏️ Редактировать</button>
-                </td>
-              </tr>`;
-            }).join('')}
-          </tbody>
-        </table>
-      </div>`;
+    renderEmployeesTable(rows);
   } catch(e) { el.innerHTML = `<div class="empty-state">Ошибка загрузки: ${escHtml(e.message)}</div>`; }
 }
 
+function renderEmployeesTable(rows) {
+  const el = document.getElementById('employees-content');
+  if (!el) return;
+  el.innerHTML = `
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
+      <h2 style="margin:0; font-size:20px; font-weight:800;">👤 Сотрудники</h2>
+      <button class="btn btn-primary" onclick="openEmployeeDrawer(null)">+ Добавить сотрудника</button>
+    </div>
+    <div class="admin-table-wrap">
+      <table class="admin-table">
+        <thead><tr>
+          <th>Имя</th><th>Email</th><th>Должность</th><th>Телефон</th><th>Телеграм</th><th>Статус</th><th>Действия</th>
+        </tr></thead>
+        <tbody>
+          ${rows.filter(r => r.fields['Имя']).map(r => {
+            const f = r.fields;
+            const status = f['Статус'] || '';
+            const statusColor = status === 'Активный' ? '#34d399' : status === 'Уволен' ? '#ef4444' : 'var(--text2)';
+            return `<tr>
+              <td><strong style="color:#fff;">${escHtml(f['Имя']||'—')}</strong></td>
+              <td style="color:var(--text2); font-size:12px;">${escHtml(f['Email']||'—')}</td>
+              <td>${escHtml(f['Должность']||'—')}</td>
+              <td style="color:var(--text2);">${escHtml(f['Телефон']||'—')}</td>
+              <td style="color:#a5b4fc;">${f['Телеграм имя'] ? '@'+escHtml(f['Телеграм имя']) : '—'}</td>
+              <td><span style="color:${statusColor}; font-size:12px; font-weight:600;">${escHtml(status||'—')}</span></td>
+              <td style="display:flex; gap:6px;">
+                <button class="btn btn-secondary btn-compact" onclick="openEmployeeDrawer('${r.id}')">✏️ Изменить</button>
+                <button class="btn btn-danger btn-compact" onclick="deleteEmployee('${r.id}','${escHtml(f['Имя']||'')}')" style="padding:0 10px;">🗑</button>
+              </td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Employee Drawer -->
+    <div id="drawer-employee" class="overlay" onclick="if(event.target===this)closeEmployeeDrawer()">
+      <div class="drawer" style="max-width:480px;">
+        <button class="drawer-close-btn" onclick="closeEmployeeDrawer()">&times;</button>
+        <div id="employee-drawer-content"></div>
+      </div>
+    </div>`;
+}
+
+function openEmployeeDrawer(id) {
+  const isNew = !id;
+  const emp = id ? State.employees.find(e => e.id === id) : null;
+  const f = emp ? emp.fields : {};
+
+  document.getElementById('employee-drawer-content').innerHTML = `
+    <div class="drawer-handle"></div>
+    <h3 class="drawer-title" style="margin-bottom:20px;">${isNew ? '➕ Новый сотрудник' : '✏️ ' + escHtml(f['Имя']||'Сотрудник')}</h3>
+
+    <div style="display:flex; flex-direction:column; gap:12px;">
+      <div class="form-group">
+        <label class="form-label">Имя *</label>
+        <input class="form-input" id="emp-name" placeholder="Имя сотрудника" value="${escHtml(f['Имя']||'')}"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Email</label>
+        <input class="form-input" id="emp-email" type="email" placeholder="email@company.com" value="${escHtml(f['Email']||'')}"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Должность</label>
+        <input class="form-input" id="emp-role" placeholder="Менеджер, Проджект, Директор..." value="${escHtml(f['Должность']||'')}"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Телефон</label>
+        <input class="form-input" id="emp-phone" type="tel" placeholder="+7..." value="${escHtml(f['Телефон']||'')}"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Телеграм (без @)</label>
+        <input class="form-input" id="emp-tg" placeholder="username" value="${escHtml(f['Телеграм имя']||'')}"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Инстаграм</label>
+        <input class="form-input" id="emp-ig" placeholder="@username" value="${escHtml(f['Инстаграм']||'')}"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Статус</label>
+        <select class="form-select" id="emp-status">
+          <option value="Активный" ${f['Статус']==='Активный'?'selected':''}>Активный</option>
+          <option value="На испытательном" ${f['Статус']==='На испытательном'?'selected':''}>На испытательном</option>
+          <option value="В отпуске" ${f['Статус']==='В отпуске'?'selected':''}>В отпуске</option>
+          <option value="Уволен" ${f['Статус']==='Уволен'?'selected':''}>Уволен</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Формат найма</label>
+        <input class="form-input" id="emp-format" placeholder="Удалённо, Офис, Фриланс..." value="${escHtml(f['Формат найма']||'')}"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Пароль (для входа в CRM)</label>
+        <input class="form-input" id="emp-password" type="password" placeholder="••••••••" value="${escHtml(f['Пароль']||'')}"/>
+      </div>
+    </div>
+
+    <div style="display:flex; gap:10px; margin-top:24px;">
+      <button class="btn btn-primary" style="flex:1;" onclick="saveEmployee('${id||''}')">
+        ${isNew ? '➕ Создать' : '💾 Сохранить'}
+      </button>
+      <button class="btn btn-secondary" onclick="closeEmployeeDrawer()">Отмена</button>
+    </div>`;
+
+  document.getElementById('drawer-employee').classList.add('open');
+}
+
+function closeEmployeeDrawer() {
+  const d = document.getElementById('drawer-employee');
+  if (d) d.classList.remove('open');
+}
+
+async function saveEmployee(id) {
+  const name = document.getElementById('emp-name')?.value.trim();
+  if (!name) { toast('Введите имя сотрудника', 'error'); return; }
+
+  const fields = {
+    'Имя':           name,
+    'Email':         document.getElementById('emp-email')?.value.trim() || null,
+    'Должность':     document.getElementById('emp-role')?.value.trim() || null,
+    'Телефон':       document.getElementById('emp-phone')?.value.trim() || null,
+    'Телеграм имя':  document.getElementById('emp-tg')?.value.trim() || null,
+    'Инстаграм':     document.getElementById('emp-ig')?.value.trim() || null,
+    'Статус':        document.getElementById('emp-status')?.value || 'Активный',
+    'Формат найма':  document.getElementById('emp-format')?.value.trim() || null,
+    'Пароль':        document.getElementById('emp-password')?.value || null,
+  };
+
+  // Remove null values for clean update
+  Object.keys(fields).forEach(k => { if (fields[k] === null) delete fields[k]; });
+
+  try {
+    if (id) {
+      await Airtable.update(CONFIG.TABLES.EMPLOYEES, id, fields);
+      const emp = State.employees.find(e => e.id === id);
+      if (emp) Object.assign(emp.fields, fields);
+      toast('Сотрудник обновлён ✓');
+    } else {
+      const result = await Airtable.create(CONFIG.TABLES.EMPLOYEES, fields);
+      if (result.records?.[0]) State.employees.push(result.records[0]);
+      toast('Сотрудник создан ✓');
+    }
+    closeEmployeeDrawer();
+    renderEmployeesTable(State.employees);
+  } catch(e) { toast('Ошибка: ' + e.message, 'error'); }
+}
+
+async function deleteEmployee(id, name) {
+  if (!confirm(`Удалить сотрудника "${name}"? Это действие нельзя отменить.`)) return;
+  try {
+    await Airtable.remove(CONFIG.TABLES.EMPLOYEES, id);
+    State.employees = State.employees.filter(e => e.id !== id);
+    renderEmployeesTable(State.employees);
+    toast('Сотрудник удалён');
+  } catch(e) { toast('Ошибка: ' + e.message, 'error'); }
+}
+
+window.openEmployeeDrawer = openEmployeeDrawer;
+window.closeEmployeeDrawer = closeEmployeeDrawer;
+window.saveEmployee = saveEmployee;
+window.deleteEmployee = deleteEmployee;
+
+// ════════════════════════════════════════════════════
 // ─── Тарифы ───
+// ════════════════════════════════════════════════════
 async function loadAdminTariffs() {
   const el = document.getElementById('tariffs-content');
   if (!el) return;
@@ -424,39 +563,540 @@ async function loadAdminTariffs() {
   try {
     const rows = await Airtable.getAll(CONFIG.TABLES.TARIFFS);
     State.tariffs = rows;
-    el.innerHTML = `
-      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
-        <h2 style="margin:0; font-size:20px; font-weight:800;">🏷️ Тарифы</h2>
-        <button class="btn btn-primary" onclick="openAdminTariffAdd()">+ Добавить тариф</button>
-      </div>
-      <div class="admin-table-wrap">
-        <table class="admin-table">
-          <thead><tr>
-            <th>Название</th><th>Стоимость</th><th>Сценариев</th><th>Снято</th><th>Смонтировано</th><th>Сторис</th><th>Действия</th>
-          </tr></thead>
-          <tbody>
-            ${rows.map(r => {
-              const f = r.fields;
-              return `<tr>
-                <td><strong>${escHtml(f['Название']||'—')}</strong></td>
-                <td style="color:#34d399; font-weight:700">${Number(f['Стоимость']||0).toLocaleString('ru-RU')} ₸</td>
-                <td style="color:var(--text2)">${f['Сценариев']||0}</td>
-                <td style="color:var(--text2)">${f['Снято']||0}</td>
-                <td style="color:var(--text2)">${f['Смонтировано']||0}</td>
-                <td style="color:var(--text2)">${f['Сторис']||0}</td>
-                <td>
-                  <button class="btn btn-secondary btn-compact" onclick="openAdminTariffEdit('${r.id}')">✏️</button>
-                  <button class="btn btn-danger btn-compact" onclick="deleteAdminTariff('${r.id}')">🗑</button>
-                </td>
-              </tr>`;
-            }).join('')}
-          </tbody>
-        </table>
-      </div>`;
-  } catch(e) { el.innerHTML = `<div class="empty-state">Ошибка загрузки: ${escHtml(e.message)}</div>`; }
+    renderTariffsTable(rows);
+  } catch(e) { el.innerHTML = `<div class="empty-state">Ошибка: ${escHtml(e.message)}</div>`; }
 }
 
+function renderTariffsTable(rows) {
+  const el = document.getElementById('tariffs-content');
+  if (!el) return;
+  const QTY_FIELDS = [
+    'Кол-во: Сценарий Reels','Кол-во: Съемка Reels','Кол-во: Монтаж Reels',
+    'Кол-во: Сторителлингов сторис','Кол-во: Тредс','Кол-во: Телеграм чат',
+    'Кол-во: Вацап чат','Кол-во: Чат бот','Кол-во: Мультипостинг',
+    'Кол-во: Таргет ФБ','Кол-во: Карусели','Кол-во: Упаковка',
+    'Кол-во: Консалтинг','Кол-во: Бриф-разбор','Кол-во: Постинг рилс и сторис'
+  ];
+  el.innerHTML = `
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
+      <h2 style="margin:0; font-size:20px; font-weight:800;">🏷️ Тарифы</h2>
+      <button class="btn btn-primary" onclick="openTariffDrawer(null)">+ Добавить тариф</button>
+    </div>
+    <div class="admin-table-wrap">
+      <table class="admin-table">
+        <thead><tr>
+          <th>Название</th><th>Стоимость</th><th>Рилсы</th><th>Сторис</th><th>Упаковка</th><th>Действия</th>
+        </tr></thead>
+        <tbody>
+          ${rows.map(r => {
+            const f = r.fields;
+            return `<tr>
+              <td><strong style="color:#fff;">${escHtml(f['Название']||'—')}</strong></td>
+              <td style="color:#34d399; font-weight:700;">${Number(f['Стоимость']||0).toLocaleString('ru-RU')} ₸</td>
+              <td style="color:var(--text2);">${Number(f['Кол-во: Монтаж Reels']||0)} шт</td>
+              <td style="color:var(--text2);">${Number(f['Кол-во: Сторителлингов сторис']||0)} шт</td>
+              <td style="color:var(--text2);">${Number(f['Кол-во: Упаковка']||0)} шт</td>
+              <td style="display:flex; gap:6px;">
+                <button class="btn btn-secondary btn-compact" onclick="openTariffDrawer('${r.id}')">✏️ Изменить</button>
+                <button class="btn btn-danger btn-compact" onclick="deleteTariff('${r.id}','${escHtml(f['Название']||'')}')" style="padding:0 10px;">🗑</button>
+              </td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+
+    <div id="drawer-tariff" class="overlay" onclick="if(event.target===this)closeTariffDrawer()">
+      <div class="drawer" style="max-width:520px; overflow-y:auto;">
+        <button class="drawer-close-btn" onclick="closeTariffDrawer()">&times;</button>
+        <div id="tariff-drawer-content"></div>
+      </div>
+    </div>`;
+}
+
+function openTariffDrawer(id) {
+  const isNew = !id;
+  const t = id ? State.tariffs.find(r => r.id === id) : null;
+  const f = t ? t.fields : {};
+  const QTY = [
+    ['Кол-во: Сценарий Reels','Сценарии Reels'],['Кол-во: Съемка Reels','Съёмка Reels'],
+    ['Кол-во: Монтаж Reels','Монтаж Reels'],['Кол-во: Сторителлингов сторис','Сторис'],
+    ['Кол-во: Тредс','Тредс'],['Кол-во: Телеграм чат','Телеграм чат'],
+    ['Кол-во: Вацап чат','Вацап чат'],['Кол-во: Чат бот','Чат бот'],
+    ['Кол-во: Мультипостинг','Мультипостинг'],['Кол-во: Таргет ФБ','Таргет ФБ'],
+    ['Кол-во: Карусели','Карусели'],['Кол-во: Упаковка','Упаковка'],
+    ['Кол-во: Консалтинг','Консалтинг'],['Кол-во: Бриф-разбор','Бриф-разбор'],
+    ['Кол-во: Постинг рилс и сторис','Постинг Reels/Stories']
+  ];
+  document.getElementById('tariff-drawer-content').innerHTML = `
+    <div class="drawer-handle"></div>
+    <h3 class="drawer-title" style="margin-bottom:20px;">${isNew ? '➕ Новый тариф' : '✏️ ' + escHtml(f['Название']||'Тариф')}</h3>
+    <div style="display:flex; flex-direction:column; gap:12px;">
+      <div class="form-group">
+        <label class="form-label">Название *</label>
+        <input class="form-input" id="tar-name" placeholder="Тариф Стандарт, VIP..." value="${escHtml(f['Название']||'')}"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Стоимость (₸) *</label>
+        <input class="form-input" id="tar-price" type="number" placeholder="0" value="${f['Стоимость']||''}"/>
+      </div>
+      <div style="border-top:1px solid rgba(255,255,255,0.07); padding-top:12px; margin-top:4px;">
+        <div style="font-size:12px; font-weight:700; color:var(--text2); margin-bottom:10px; text-transform:uppercase; letter-spacing:0.06em;">Включено в тариф</div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+          ${QTY.map(([key, label]) => `
+            <div class="form-group" style="margin:0;">
+              <label class="form-label" style="font-size:11px;">${escHtml(label)}</label>
+              <input class="form-input compact-input" data-tar-key="${escHtml(key)}" type="number" min="0" placeholder="0" value="${Number(f[key]||0)||''}"/>
+            </div>`).join('')}
+        </div>
+      </div>
+    </div>
+    <div style="display:flex; gap:10px; margin-top:24px;">
+      <button class="btn btn-primary" style="flex:1;" onclick="saveTariff('${id||''}')">
+        ${isNew ? '➕ Создать' : '💾 Сохранить'}
+      </button>
+      <button class="btn btn-secondary" onclick="closeTariffDrawer()">Отмена</button>
+    </div>`;
+  document.getElementById('drawer-tariff').classList.add('open');
+}
+
+function closeTariffDrawer() {
+  const d = document.getElementById('drawer-tariff');
+  if (d) d.classList.remove('open');
+}
+
+async function saveTariff(id) {
+  const name = document.getElementById('tar-name')?.value.trim();
+  const price = Number(document.getElementById('tar-price')?.value) || 0;
+  if (!name) { toast('Введите название тарифа', 'error'); return; }
+  const fields = { 'Название': name, 'Стоимость': price };
+  document.querySelectorAll('[data-tar-key]').forEach(inp => {
+    const v = Number(inp.value) || 0;
+    if (v > 0) fields[inp.dataset.tarKey] = v;
+    else fields[inp.dataset.tarKey] = 0;
+  });
+  try {
+    if (id) {
+      await Airtable.update(CONFIG.TABLES.TARIFFS, id, fields);
+      const t = State.tariffs.find(r => r.id === id);
+      if (t) Object.assign(t.fields, fields);
+      toast('Тариф обновлён ✓');
+    } else {
+      const res = await Airtable.create(CONFIG.TABLES.TARIFFS, fields);
+      if (res.records?.[0]) State.tariffs.push(res.records[0]);
+      toast('Тариф создан ✓');
+    }
+    closeTariffDrawer();
+    renderTariffsTable(State.tariffs);
+  } catch(e) { toast('Ошибка: ' + e.message, 'error'); }
+}
+
+async function deleteTariff(id, name) {
+  if (!confirm(`Удалить тариф "${name}"?`)) return;
+  try {
+    await Airtable.remove(CONFIG.TABLES.TARIFFS, id);
+    State.tariffs = State.tariffs.filter(r => r.id !== id);
+    renderTariffsTable(State.tariffs);
+    toast('Тариф удалён');
+  } catch(e) { toast('Ошибка: ' + e.message, 'error'); }
+}
+
+window.openTariffDrawer = openTariffDrawer;
+window.closeTariffDrawer = closeTariffDrawer;
+window.saveTariff = saveTariff;
+window.deleteTariff = deleteTariff;
+
+// ════════════════════════════════════════════════════
+// ─── Конструктор тарифов ───
+// ════════════════════════════════════════════════════
+
+// Группировка услуг по категориям с иконками
+const CATEGORY_ICONS = {
+  'Рилс': '🎬',
+  'Сторис': '📱',
+  'Тредс': '🧵',
+  'Телеграм': '✈️',
+  'Вацап': '💬',
+  'Чат бот': '🤖',
+  'Мультипостинг': '📡',
+  'Таргет ФБ': '🎯',
+  'Карусели': '🎠',
+  'Упаковка': '📦',
+  'Консалтинг': '💡',
+  'YouTube видео': '▶️',
+  'Разборы': '🔍',
+  'Постинг': '📤',
+};
+
+async function loadTariffConstructor() {
+  const el = document.getElementById('tariff-constructor-content');
+  if (!el) return;
+  el.innerHTML = `<div class="loading-state"><div class="spinner"></div></div>`;
+  try {
+    const [tariffs, services] = await Promise.all([
+      Airtable.getAll(CONFIG.TABLES.TARIFFS),
+      Airtable.getAll(CONFIG.TABLES.SERVICES),
+    ]);
+    State.tariffs = tariffs;
+    State.services = services;
+    renderTariffConstructorPage();
+  } catch(e) {
+    el.innerHTML = `<div class="empty-state">Ошибка: ${escHtml(e.message)}</div>`;
+  }
+}
+
+function _tcCalcTariff(tariffFields, serviceLookup) {
+  let totalCost = 0;
+  const breakdown = [];
+  for (const [key, qtyVal] of Object.entries(tariffFields)) {
+    if (!key.startsWith('Кол-во:')) continue;
+    const qty = Number(qtyVal) || 0;
+    if (qty <= 0) continue;
+    const svcName = findServiceName(key);
+    const svc = serviceLookup[svcName];
+    if (!svc) continue;
+    let itemCost = 0;
+    if (svcName === 'Съемка Reels') {
+      itemCost = (qty / 10) * svc.sebes;
+    } else {
+      itemCost = qty * svc.sebes;
+    }
+    totalCost += itemCost;
+    breakdown.push({ name: svcName, qty, unit: svc.unit, sebes: svc.sebes, itemCost });
+  }
+  return { totalCost, breakdown };
+}
+
+function renderTariffConstructorPage() {
+  const el = document.getElementById('tariff-constructor-content');
+  if (!el) return;
+
+  // Строим serviceLookup
+  const serviceLookup = {};
+  (State.services || []).forEach(s => {
+    const f = s.fields || {};
+    const name = f['Название услуги'];
+    if (name) serviceLookup[name] = {
+      sebes: Number(f['Себестоимость']) || 0,
+      unit: f['Ед. измерения'] || 'шт',
+      category: f['Категория'] || 'Прочее'
+    };
+  });
+
+  const tariffs = State.tariffs || [];
+
+  const cardsHtml = tariffs.length === 0
+    ? `<div style="color:var(--text2); font-size:13px; padding:20px 0;">Нет тарифов. Создайте первый!</div>`
+    : tariffs.map(t => {
+        const f = t.fields || {};
+        const name = f['Название'] || '—';
+        const salePrice = Number(f['Стоимость']) || 0;
+        const { totalCost, breakdown } = _tcCalcTariff(f, serviceLookup);
+        const profit = salePrice - totalCost;
+        const margin = salePrice > 0 ? Math.round((profit / salePrice) * 100) : 0;
+        const marginColor = margin >= 70 ? '#34d399' : margin >= 50 ? '#f59e0b' : '#ef4444';
+        const activeSvcs = breakdown.filter(b => b.qty > 0);
+        const badgesHtml = activeSvcs.slice(0, 5).map(b => {
+          const icon = CATEGORY_ICONS[serviceLookup[b.name]?.category] || '•';
+          return `<span style="background:rgba(255,255,255,0.06); border-radius:6px; padding:2px 8px; font-size:11px; white-space:nowrap;">${icon} ${escHtml(b.name.replace(' Reels','').replace(' настройка','').replace('YouTube видео ','YT '))}: ${b.qty}</span>`;
+        }).join('');
+        const moreBadges = activeSvcs.length > 5 ? `<span style="color:var(--text2); font-size:11px;">+${activeSvcs.length - 5} ещё</span>` : '';
+
+        return `
+          <div class="card" style="padding:18px; display:flex; flex-direction:column; gap:12px; cursor:pointer; transition:all 0.2s;" onclick="openTariffConstructorDrawer('${t.id}')">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+              <div style="font-size:16px; font-weight:800; color:#fff;">${escHtml(name)}</div>
+              <div style="display:flex; gap:6px; align-items:center;">
+                <button onclick="event.stopPropagation(); deleteTariffFromConstructor('${t.id}','${escHtml(name)}')" style="background:none; border:none; color:var(--danger); cursor:pointer; font-size:16px; padding:2px 4px;" title="Удалить">🗑️</button>
+              </div>
+            </div>
+            <div style="display:flex; gap:16px; flex-wrap:wrap;">
+              <div>
+                <div style="font-size:10px; color:var(--text2); font-weight:700; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:2px;">Цена</div>
+                <div style="font-size:18px; font-weight:800; color:#34d399;">${salePrice.toLocaleString('ru-RU')} ₸</div>
+              </div>
+              <div>
+                <div style="font-size:10px; color:var(--text2); font-weight:700; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:2px;">Себестоимость</div>
+                <div style="font-size:18px; font-weight:800; color:#fb7185;">${totalCost.toLocaleString('ru-RU')} ₸</div>
+              </div>
+              <div>
+                <div style="font-size:10px; color:var(--text2); font-weight:700; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:2px;">Маржа</div>
+                <div style="font-size:18px; font-weight:800; color:${marginColor};">${margin}%</div>
+              </div>
+              <div>
+                <div style="font-size:10px; color:var(--text2); font-weight:700; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:2px;">Прибыль</div>
+                <div style="font-size:18px; font-weight:800; color:#a78bfa;">${profit.toLocaleString('ru-RU')} ₸</div>
+              </div>
+            </div>
+            ${activeSvcs.length > 0 ? `<div style="display:flex; flex-wrap:wrap; gap:6px;">${badgesHtml}${moreBadges}</div>` : `<div style="color:var(--text2); font-size:12px;">Состав не задан</div>`}
+          </div>`;
+      }).join('');
+
+  el.innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
+      <h2 style="margin:0; font-size:20px; font-weight:800;">🏗️ Конструктор тарифов</h2>
+      <button class="btn btn-primary" onclick="openTariffConstructorDrawer(null)" style="background:linear-gradient(135deg,#6366f1,#8b5cf6); border:none; color:#fff !important; height:38px; padding:0 18px; display:inline-flex; align-items:center; gap:6px;">➕ Новый тариф</button>
+    </div>
+
+    <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(340px, 1fr)); gap:16px; margin-bottom:24px;">
+      ${cardsHtml}
+    </div>
+
+    <!-- DRAWER-КОНСТРУКТОР -->
+    <div id="drawer-tc" class="overlay" onclick="if(event.target===this)closeTariffConstructorDrawer()">
+      <div class="drawer" style="width:600px; max-width:95vw; max-height:95vh; overflow-y:auto; display:flex; flex-direction:column;">
+        <button class="drawer-close-btn" onclick="closeTariffConstructorDrawer()">&times;</button>
+        <div id="tc-drawer-content"></div>
+      </div>
+    </div>`;
+}
+
+function openTariffConstructorDrawer(id) {
+  const isNew = !id;
+  const t = id ? (State.tariffs || []).find(r => r.id === id) : null;
+  const f = t ? (t.fields || {}) : {};
+
+  // Строим serviceLookup
+  const serviceLookup = {};
+  (State.services || []).forEach(s => {
+    const sf = s.fields || {};
+    const name = sf['Название услуги'];
+    if (name) serviceLookup[name] = {
+      sebes: Number(sf['Себестоимость']) || 0,
+      unit: sf['Ед. измерения'] || 'шт',
+      category: sf['Категория'] || 'Прочее'
+    };
+  });
+
+  // Группируем услуги по категориям
+  const byCategory = {};
+  (State.services || []).forEach(s => {
+    const sf = s.fields || {};
+    const cat = sf['Категория'] || 'Прочее';
+    if (!byCategory[cat]) byCategory[cat] = [];
+    byCategory[cat].push(sf);
+  });
+
+  // Обратный маппинг: serviceName → tariff key (без "Кол-во: ")
+  const svcToTarKey = {};
+  if (typeof TARIFF_SERVICE_MAP !== 'undefined') {
+    for (const [tarKey, svcName] of Object.entries(TARIFF_SERVICE_MAP)) {
+      svcToTarKey[svcName] = tarKey;
+    }
+  }
+
+  const rowsHtml = Object.entries(byCategory).map(([cat, svcs]) => {
+    const icon = CATEGORY_ICONS[cat] || '📌';
+    const rowsInCat = svcs.map(sf => {
+      const svcName = sf['Название услуги'] || '';
+      const tarKey = svcToTarKey[svcName] ? ('Кол-во: ' + svcToTarKey[svcName]) : null;
+      if (!tarKey) return '';
+      const currentQty = tarKey ? (Number(f[tarKey]) || 0) : 0;
+      const sebes = Number(sf['Себестоимость']) || 0;
+      const unit = sf['Ед. измерения'] || 'шт';
+      const lineTotal = svcName === 'Съемка Reels'
+        ? Math.round((currentQty / 10) * sebes)
+        : currentQty * sebes;
+      return `
+        <div style="display:grid; grid-template-columns:1fr 80px 120px 100px; gap:8px; align-items:center; padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.04);">
+          <div>
+            <div style="font-size:13px; font-weight:600; color:#fff;">${escHtml(svcName)}</div>
+            ${svcName === 'Съемка Reels' ? `<div style="font-size:10px; color:var(--text2);">норм: 10 рилс = 1 ч</div>` : ''}
+          </div>
+          <div style="display:flex; align-items:center; gap:4px;">
+            <input type="number" min="0" data-tar-key="${escHtml(tarKey)}" data-svc="${escHtml(svcName)}" data-sebes="${sebes}"
+              value="${currentQty || ''}" placeholder="0"
+              oninput="tcRecalc()"
+              style="width:72px; height:32px; background:var(--surface); border:1px solid rgba(255,255,255,0.1); border-radius:8px; color:#fff; font-size:13px; font-weight:700; text-align:center; padding:0 4px;"/>
+          </div>
+          <div style="font-size:12px; color:var(--text2);">${escHtml(unit)} × ${sebes.toLocaleString('ru-RU')} ₸</div>
+          <div id="tc-line-${escHtml(tarKey.replace(/[^a-zA-Zа-яА-Я0-9]/g,'_'))}" style="font-size:13px; font-weight:700; color:${lineTotal > 0 ? '#fb7185' : 'var(--text2)'}; text-align:right;">${lineTotal > 0 ? lineTotal.toLocaleString('ru-RU') + ' ₸' : '—'}</div>
+        </div>`;
+    }).filter(Boolean).join('');
+    if (!rowsInCat) return '';
+    return `
+      <div style="margin-bottom:4px;">
+        <div style="font-size:12px; font-weight:800; color:var(--text2); text-transform:uppercase; letter-spacing:0.06em; padding:10px 0 4px; display:flex; align-items:center; gap:6px;">${icon} ${escHtml(cat)}</div>
+        ${rowsInCat}
+      </div>`;
+  }).join('');
+
+  const salePrice = Number(f['Стоимость']) || 0;
+  const { totalCost } = _tcCalcTariff(f, serviceLookup);
+  const profit = salePrice - totalCost;
+  const margin = salePrice > 0 ? Math.round((profit / salePrice) * 100) : 0;
+  const marginColor = margin >= 70 ? '#34d399' : margin >= 50 ? '#f59e0b' : '#ef4444';
+
+  document.getElementById('tc-drawer-content').innerHTML = `
+    <div class="drawer-handle"></div>
+    <div class="drawer-title" style="margin-bottom:16px;">${isNew ? '➕ Новый тариф' : '✏️ ' + escHtml(f['Название'] || 'Тариф')}</div>
+
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px;">
+      <div class="form-group" style="margin:0;">
+        <label class="form-label">Название тарифа *</label>
+        <input id="tc-name" class="form-input" placeholder="Тариф Стандарт..." value="${escHtml(f['Название'] || '')}"/>
+      </div>
+      <div class="form-group" style="margin:0;">
+        <label class="form-label">Цена продажи (₸) *</label>
+        <input id="tc-price" class="form-input" type="number" placeholder="0" value="${salePrice || ''}" oninput="tcRecalc()"/>
+      </div>
+    </div>
+
+    <!-- Живая статистика -->
+    <div id="tc-stats" style="display:grid; grid-template-columns:repeat(4, 1fr); gap:10px; margin-bottom:20px; background:var(--surface2); border-radius:12px; padding:14px; border:1px solid rgba(255,255,255,0.06);">
+      <div style="text-align:center;">
+        <div style="font-size:10px; color:var(--text2); font-weight:700; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px;">Себестоимость</div>
+        <div id="tc-stat-cost" style="font-size:16px; font-weight:800; color:#fb7185;">${totalCost.toLocaleString('ru-RU')} ₸</div>
+      </div>
+      <div style="text-align:center;">
+        <div style="font-size:10px; color:var(--text2); font-weight:700; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px;">Цена</div>
+        <div id="tc-stat-price" style="font-size:16px; font-weight:800; color:#34d399;">${salePrice.toLocaleString('ru-RU')} ₸</div>
+      </div>
+      <div style="text-align:center;">
+        <div style="font-size:10px; color:var(--text2); font-weight:700; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px;">Прибыль</div>
+        <div id="tc-stat-profit" style="font-size:16px; font-weight:800; color:#a78bfa;">${profit.toLocaleString('ru-RU')} ₸</div>
+      </div>
+      <div style="text-align:center;">
+        <div style="font-size:10px; color:var(--text2); font-weight:700; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px;">Маржа</div>
+        <div id="tc-stat-margin" style="font-size:16px; font-weight:800; color:${marginColor};">${margin}%</div>
+      </div>
+    </div>
+
+    <!-- Индикатор маржи -->
+    <div style="margin-bottom:20px; background:var(--surface2); border-radius:8px; height:8px; overflow:hidden;">
+      <div id="tc-margin-bar" style="height:8px; border-radius:8px; background:${marginColor}; width:${Math.min(Math.max(margin,0),100)}%; transition:all 0.3s;"></div>
+    </div>
+
+    <!-- Состав тарифа -->
+    <div style="font-size:12px; font-weight:800; color:var(--text2); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:8px;">📋 Состав тарифа</div>
+    <div style="padding:0 4px;">
+      <!-- Шапка таблицы -->
+      <div style="display:grid; grid-template-columns:1fr 80px 120px 100px; gap:8px; padding:6px 0; border-bottom:1px solid rgba(255,255,255,0.08);">
+        <div style="font-size:10px; color:var(--text2); font-weight:700; text-transform:uppercase;">Услуга</div>
+        <div style="font-size:10px; color:var(--text2); font-weight:700; text-transform:uppercase;">Кол-во</div>
+        <div style="font-size:10px; color:var(--text2); font-weight:700; text-transform:uppercase;">Ед. × Цена</div>
+        <div style="font-size:10px; color:var(--text2); font-weight:700; text-transform:uppercase; text-align:right;">Итого</div>
+      </div>
+      ${rowsHtml}
+    </div>
+
+    <div style="display:flex; gap:10px; margin-top:24px; padding-top:16px; border-top:1px solid rgba(255,255,255,0.06);">
+      <button id="tc-save-btn" class="btn btn-primary" style="flex:1; background:linear-gradient(135deg,#6366f1,#8b5cf6); border:none; color:#fff !important;" onclick="saveTariffFromConstructor('${id || ''}')">
+        ${isNew ? '➕ Создать тариф' : '💾 Сохранить'}
+      </button>
+      <button class="btn btn-secondary" onclick="closeTariffConstructorDrawer()">Отмена</button>
+    </div>`;
+
+  document.getElementById('drawer-tc').classList.add('open');
+}
+
+function tcRecalc() {
+  // Пересчёт себестоимости в реальном времени
+  const serviceLookup = {};
+  (State.services || []).forEach(s => {
+    const sf = s.fields || {};
+    const name = sf['Название услуги'];
+    if (name) serviceLookup[name] = { sebes: Number(sf['Себестоимость']) || 0 };
+  });
+
+  let totalCost = 0;
+  document.querySelectorAll('#tc-drawer-content [data-tar-key]').forEach(inp => {
+    const qty = Number(inp.value) || 0;
+    const svcName = inp.dataset.svc;
+    const sebes = Number(inp.dataset.sebes) || 0;
+    let itemCost = 0;
+    if (svcName === 'Съемка Reels') {
+      itemCost = (qty / 10) * sebes;
+    } else {
+      itemCost = qty * sebes;
+    }
+    totalCost += itemCost;
+
+    // Обновляем строку
+    const lineId = 'tc-line-' + inp.dataset.tarKey.replace(/[^a-zA-Zа-яА-Я0-9]/g, '_');
+    const lineEl = document.getElementById(lineId);
+    if (lineEl) {
+      lineEl.textContent = itemCost > 0 ? itemCost.toLocaleString('ru-RU') + ' ₸' : '—';
+      lineEl.style.color = itemCost > 0 ? '#fb7185' : 'var(--text2)';
+    }
+  });
+
+  const salePrice = Number(document.getElementById('tc-price')?.value) || 0;
+  const profit = salePrice - totalCost;
+  const margin = salePrice > 0 ? Math.round((profit / salePrice) * 100) : 0;
+  const marginColor = margin >= 70 ? '#34d399' : margin >= 50 ? '#f59e0b' : '#ef4444';
+
+  const costEl = document.getElementById('tc-stat-cost');
+  const priceEl = document.getElementById('tc-stat-price');
+  const profitEl = document.getElementById('tc-stat-profit');
+  const marginEl = document.getElementById('tc-stat-margin');
+  const barEl = document.getElementById('tc-margin-bar');
+
+  if (costEl) costEl.textContent = totalCost.toLocaleString('ru-RU') + ' ₸';
+  if (priceEl) { priceEl.textContent = salePrice.toLocaleString('ru-RU') + ' ₸'; }
+  if (profitEl) { profitEl.textContent = profit.toLocaleString('ru-RU') + ' ₸'; profitEl.style.color = profit >= 0 ? '#a78bfa' : '#ef4444'; }
+  if (marginEl) { marginEl.textContent = margin + '%'; marginEl.style.color = marginColor; }
+  if (barEl) { barEl.style.width = Math.min(Math.max(margin, 0), 100) + '%'; barEl.style.background = marginColor; }
+}
+
+function closeTariffConstructorDrawer() {
+  const d = document.getElementById('drawer-tc');
+  if (d) d.classList.remove('open');
+}
+
+async function saveTariffFromConstructor(id) {
+  const name = document.getElementById('tc-name')?.value.trim();
+  const price = Number(document.getElementById('tc-price')?.value) || 0;
+  if (!name) { toast('Введите название тарифа', 'error'); return; }
+
+  const fields = { 'Название': name, 'Стоимость': price };
+  document.querySelectorAll('#tc-drawer-content [data-tar-key]').forEach(inp => {
+    fields[inp.dataset.tarKey] = Number(inp.value) || 0;
+  });
+
+  const btn = document.getElementById('tc-save-btn');
+  btn.innerHTML = `<span class="spinner"></span>`; btn.disabled = true;
+  try {
+    if (id) {
+      await Airtable.update(CONFIG.TABLES.TARIFFS, id, fields);
+      const t = (State.tariffs || []).find(r => r.id === id);
+      if (t) Object.assign(t.fields, fields);
+      toast('Тариф обновлён ✓');
+    } else {
+      const res = await Airtable.create(CONFIG.TABLES.TARIFFS, fields);
+      if (res.records?.[0]) State.tariffs.push(res.records[0]);
+      toast('Тариф создан ✓');
+    }
+    closeTariffConstructorDrawer();
+    renderTariffConstructorPage();
+  } catch(e) {
+    toast('Ошибка: ' + e.message, 'error');
+  } finally {
+    btn.innerHTML = id ? '💾 Сохранить' : '➕ Создать тариф';
+    btn.disabled = false;
+  }
+}
+
+async function deleteTariffFromConstructor(id, name) {
+  if (!confirm(`Удалить тариф "${name}"?`)) return;
+  try {
+    await Airtable.remove(CONFIG.TABLES.TARIFFS, id);
+    State.tariffs = (State.tariffs || []).filter(r => r.id !== id);
+    renderTariffConstructorPage();
+    toast('Тариф удалён');
+  } catch(e) { toast('Ошибка: ' + e.message, 'error'); }
+}
+
+window.loadTariffConstructor = loadTariffConstructor;
+window.openTariffConstructorDrawer = openTariffConstructorDrawer;
+window.closeTariffConstructorDrawer = closeTariffConstructorDrawer;
+window.saveTariffFromConstructor = saveTariffFromConstructor;
+window.deleteTariffFromConstructor = deleteTariffFromConstructor;
+window.tcRecalc = tcRecalc;
+
+// ════════════════════════════════════════════════════
 // ─── Цены на услуги ───
+// ════════════════════════════════════════════════════
 async function loadAdminServices() {
   const el = document.getElementById('services-content');
   if (!el) return;
@@ -464,110 +1104,148 @@ async function loadAdminServices() {
   try {
     const rows = await Airtable.getAll(CONFIG.TABLES.SERVICES);
     State.services = rows;
-    el.innerHTML = `
-      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
-        <h2 style="margin:0; font-size:20px; font-weight:800;">💲 Цены на услуги</h2>
-        <button class="btn btn-primary" onclick="openAdminServiceAdd()">+ Добавить услугу</button>
-      </div>
-      <div class="admin-table-wrap">
-        <table class="admin-table">
-          <thead><tr>
-            <th>Название услуги</th><th>Цена продажи</th><th>Себестоимость</th><th>Единица</th><th>Действия</th>
-          </tr></thead>
-          <tbody>
-            ${rows.map(r => {
-              const f = r.fields;
-              return `<tr>
-                <td><strong>${escHtml(f['Название услуги']||f['Название']||'—')}</strong></td>
-                <td style="color:#34d399; font-weight:700">${Number(f['Цена продажи']||0).toLocaleString('ru-RU')} ₸</td>
-                <td style="color:#f59e0b">${Number(f['Себестоимость']||0).toLocaleString('ru-RU')} ₸</td>
-                <td style="color:var(--text2)">${escHtml(f['Единица']||'шт')}</td>
-                <td>
-                  <button class="btn btn-secondary btn-compact" onclick="openAdminServiceEdit('${r.id}')">✏️</button>
-                </td>
-              </tr>`;
-            }).join('')}
-          </tbody>
-        </table>
-      </div>`;
-  } catch(e) { el.innerHTML = `<div class="empty-state">Ошибка загрузки: ${escHtml(e.message)}</div>`; }
+    renderServicesTable(rows);
+  } catch(e) { el.innerHTML = `<div class="empty-state">Ошибка: ${escHtml(e.message)}</div>`; }
 }
 
-// ─── Калькулятор тарифов ───
-async function loadAdminCalculator() {
-  const el = document.getElementById('calculator-content');
+function renderServicesTable(rows) {
+  const el = document.getElementById('services-content');
   if (!el) return;
-  if (State.services.length === 0) {
-    try { State.services = await Airtable.getAll(CONFIG.TABLES.SERVICES); } catch(e) {}
-  }
-  const services = State.services;
-
   el.innerHTML = `
-    <h2 style="margin:0 0 20px; font-size:20px; font-weight:800;">🧮 Калькулятор стоимости тарифа</h2>
-    <div class="card" style="max-width:600px;">
-      <div style="display:flex; flex-direction:column; gap:12px; margin-bottom:16px;">
-        ${services.map(s => {
-          const f = s.fields;
-          const name = escHtml(f['Название услуги']||f['Название']||'');
-          const sale = Number(f['Цена продажи']||0);
-          const sebes = Number(f['Себестоимость']||0);
-          const unit = escHtml(f['Единица']||'шт');
-          return `
-            <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-              <div style="flex:1; min-width:140px; font-size:13px; font-weight:600;">${name}</div>
-              <div style="color:var(--text2); font-size:11px; width:90px;">${sale.toLocaleString('ru-RU')} ₸/${unit}</div>
-              <input type="number" min="0" placeholder="0" data-service="${s.id}" data-sale="${sale}" data-sebes="${sebes}"
-                class="form-input compact-input calc-qty" style="width:80px;" oninput="calcUpdateTotal()"/>
-              <div style="color:var(--text2); font-size:12px; width:100px; text-align:right;" id="calc-line-${s.id}">— ₸</div>
-            </div>`;
-        }).join('')}
-      </div>
-      <div style="border-top:1px solid rgba(255,255,255,0.08); padding-top:14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
-        <div>
-          <div style="font-size:12px; color:var(--text2); margin-bottom:2px;">Цена продажи</div>
-          <div id="calc-total-sale" style="font-size:22px; font-weight:800; color:#34d399;">0 ₸</div>
-        </div>
-        <div>
-          <div style="font-size:12px; color:var(--text2); margin-bottom:2px;">Себестоимость</div>
-          <div id="calc-total-sebes" style="font-size:18px; font-weight:700; color:#f59e0b;">0 ₸</div>
-        </div>
-        <div>
-          <div style="font-size:12px; color:var(--text2); margin-bottom:2px;">Маржа</div>
-          <div id="calc-total-margin" style="font-size:18px; font-weight:700; color:#a5b4fc;">0 ₸</div>
-        </div>
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
+      <h2 style="margin:0; font-size:20px; font-weight:800;">💲 Цены на услуги</h2>
+      <button class="btn btn-primary" onclick="openServiceDrawer(null)">+ Добавить услугу</button>
+    </div>
+    <div class="admin-table-wrap">
+      <table class="admin-table">
+        <thead><tr>
+          <th>Название</th><th>Категория</th><th>Ед. изм.</th><th>Цена продажи</th><th>Себестоимость</th><th>Маржа</th><th>Действия</th>
+        </tr></thead>
+        <tbody>
+          ${rows.map(r => {
+            const f = r.fields;
+            const sale = Number(f['Цена продажи']||0);
+            const sebes = Number(f['Себестоимость']||0);
+            const margin = sale - sebes;
+            const marginPct = sale > 0 ? Math.round(margin/sale*100) : 0;
+            return `<tr>
+              <td><strong style="color:#fff;">${escHtml(f['Название услуги']||'—')}</strong></td>
+              <td style="color:var(--text2); font-size:12px;">${escHtml(f['Категория']||'—')}</td>
+              <td style="color:var(--text2);">${escHtml(f['Ед. измерения']||'шт')}</td>
+              <td style="color:#34d399; font-weight:700;">${sale.toLocaleString('ru-RU')} ₸</td>
+              <td style="color:#f59e0b;">${sebes.toLocaleString('ru-RU')} ₸</td>
+              <td style="color:${marginPct>=50?'#34d399':marginPct>=30?'#f59e0b':'#ef4444'}; font-weight:600;">${marginPct}%</td>
+              <td style="display:flex; gap:6px;">
+                <button class="btn btn-secondary btn-compact" onclick="openServiceDrawer('${r.id}')">✏️</button>
+                <button class="btn btn-danger btn-compact" onclick="deleteService('${r.id}','${escHtml(f['Название услуги']||'')}')" style="padding:0 10px;">🗑</button>
+              </td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+
+    <div id="drawer-service" class="overlay" onclick="if(event.target===this)closeServiceDrawer()">
+      <div class="drawer" style="max-width:440px;">
+        <button class="drawer-close-btn" onclick="closeServiceDrawer()">&times;</button>
+        <div id="service-drawer-content"></div>
       </div>
     </div>`;
 }
 
-function calcUpdateTotal() {
-  let totalSale = 0, totalSebes = 0;
-  document.querySelectorAll('.calc-qty').forEach(input => {
-    const qty = Number(input.value) || 0;
-    const sale = Number(input.dataset.sale) || 0;
-    const sebes = Number(input.dataset.sebes) || 0;
-    const sid = input.dataset.service;
-    const lineSale = qty * sale;
-    const lineSebes = qty * sebes;
-    totalSale += lineSale;
-    totalSebes += lineSebes;
-    const lineEl = document.getElementById('calc-line-' + sid);
-    if (lineEl) lineEl.textContent = qty > 0 ? lineSale.toLocaleString('ru-RU') + ' ₸' : '— ₸';
-  });
-  const margin = totalSale - totalSebes;
-  const fmt = n => n.toLocaleString('ru-RU') + ' ₸';
-  document.getElementById('calc-total-sale').textContent   = fmt(totalSale);
-  document.getElementById('calc-total-sebes').textContent = fmt(totalSebes);
-  document.getElementById('calc-total-margin').textContent = fmt(margin);
+function openServiceDrawer(id) {
+  const isNew = !id;
+  const s = id ? State.services.find(r => r.id === id) : null;
+  const f = s ? s.fields : {};
+  document.getElementById('service-drawer-content').innerHTML = `
+    <div class="drawer-handle"></div>
+    <h3 class="drawer-title" style="margin-bottom:20px;">${isNew ? '➕ Новая услуга' : '✏️ ' + escHtml(f['Название услуги']||'Услуга')}</h3>
+    <div style="display:flex; flex-direction:column; gap:12px;">
+      <div class="form-group">
+        <label class="form-label">Название *</label>
+        <input class="form-input" id="svc-name" placeholder="Съёмка Reels, Монтаж..." value="${escHtml(f['Название услуги']||'')}"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Категория</label>
+        <input class="form-input" id="svc-cat" placeholder="Производство, Маркетинг..." value="${escHtml(f['Категория']||'')}"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Единица измерения</label>
+        <input class="form-input" id="svc-unit" placeholder="шт, ч, мес..." value="${escHtml(f['Ед. измерения']||'')}"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Цена продажи (₸)</label>
+        <input class="form-input" id="svc-sale" type="number" placeholder="0" value="${f['Цена продажи']||''}"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Себестоимость (₸)</label>
+        <input class="form-input" id="svc-sebes" type="number" placeholder="0" value="${f['Себестоимость']||''}"/>
+      </div>
+    </div>
+    <div style="display:flex; gap:10px; margin-top:24px;">
+      <button class="btn btn-primary" style="flex:1;" onclick="saveService('${id||''}')">
+        ${isNew ? '➕ Создать' : '💾 Сохранить'}
+      </button>
+      <button class="btn btn-secondary" onclick="closeServiceDrawer()">Отмена</button>
+    </div>`;
+  document.getElementById('drawer-service').classList.add('open');
 }
-window.calcUpdateTotal = calcUpdateTotal;
 
+function closeServiceDrawer() {
+  const d = document.getElementById('drawer-service');
+  if (d) d.classList.remove('open');
+}
+
+async function saveService(id) {
+  const name = document.getElementById('svc-name')?.value.trim();
+  if (!name) { toast('Введите название услуги', 'error'); return; }
+  const fields = {
+    'Название услуги': name,
+    'Категория':       document.getElementById('svc-cat')?.value.trim() || null,
+    'Ед. измерения':   document.getElementById('svc-unit')?.value.trim() || null,
+    'Цена продажи':    Number(document.getElementById('svc-sale')?.value) || 0,
+    'Себестоимость':   Number(document.getElementById('svc-sebes')?.value) || 0,
+  };
+  Object.keys(fields).forEach(k => { if (fields[k] === null) delete fields[k]; });
+  try {
+    if (id) {
+      await Airtable.update(CONFIG.TABLES.SERVICES, id, fields);
+      const s = State.services.find(r => r.id === id);
+      if (s) Object.assign(s.fields, fields);
+      toast('Услуга обновлена ✓');
+    } else {
+      const res = await Airtable.create(CONFIG.TABLES.SERVICES, fields);
+      if (res.records?.[0]) State.services.push(res.records[0]);
+      toast('Услуга создана ✓');
+    }
+    closeServiceDrawer();
+    renderServicesTable(State.services);
+  } catch(e) { toast('Ошибка: ' + e.message, 'error'); }
+}
+
+async function deleteService(id, name) {
+  if (!confirm(`Удалить услугу "${name}"?`)) return;
+  try {
+    await Airtable.remove(CONFIG.TABLES.SERVICES, id);
+    State.services = State.services.filter(r => r.id !== id);
+    renderServicesTable(State.services);
+    toast('Услуга удалена');
+  } catch(e) { toast('Ошибка: ' + e.message, 'error'); }
+}
+
+window.openServiceDrawer = openServiceDrawer;
+window.closeServiceDrawer = closeServiceDrawer;
+window.saveService = saveService;
+window.deleteService = deleteService;
+
+// ════════════════════════════════════════════════════
 // ─── Партнеры ───
+// ════════════════════════════════════════════════════
 async function loadAdminPartners() {
   const el = document.getElementById('partners-content');
   if (!el) return;
   if (typeof loadPartners === 'function') loadPartners();
   const partners = JSON.parse(localStorage.getItem('crm_partners') || '["Абдулла","Дарина","Сухраб"]');
-
   el.innerHTML = `
     <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
       <h2 style="margin:0; font-size:20px; font-weight:800;">🤝 Партнеры</h2>
@@ -607,52 +1285,6 @@ function adminDeletePartner(name) {
 }
 window.adminAddPartner = adminAddPartner;
 window.adminDeletePartner = adminDeletePartner;
-
-// ─── Stubs for employee/tariff/service edit (full drawers can be added later) ───
-function openAdminEmployeeEdit(id) { toast('Редактирование через карточку Baserow — скоро здесь появится форма', 'info'); }
-function openAdminTariffEdit(id) {
-  const t = State.tariffs.find(r => r.id === id); if (!t) return;
-  const f = t.fields;
-  const name = prompt('Название тарифа:', f['Название'] || '');
-  if (name === null) return;
-  const cost = prompt('Стоимость (₸):', f['Стоимость'] || '0');
-  if (cost === null) return;
-  Airtable.update(CONFIG.TABLES.TARIFFS, id, { 'Название': name.trim(), 'Стоимость': Number(cost) })
-    .then(() => { toast('Тариф обновлён ✓'); loadAdminTariffs(); })
-    .catch(e => toast('Ошибка: ' + e.message, 'error'));
-}
-function openAdminTariffAdd() {
-  const name = prompt('Название нового тарифа:');
-  if (!name?.trim()) return;
-  const cost = prompt('Стоимость (₸):', '0');
-  Airtable.create(CONFIG.TABLES.TARIFFS, { 'Название': name.trim(), 'Стоимость': Number(cost || 0) })
-    .then(() => { toast('Тариф создан ✓'); loadAdminTariffs(); })
-    .catch(e => toast('Ошибка: ' + e.message, 'error'));
-}
-function deleteAdminTariff(id) {
-  if (!confirm('Удалить тариф? Это действие нельзя отменить.')) return;
-  Airtable.remove(CONFIG.TABLES.TARIFFS, id)
-    .then(() => { toast('Тариф удалён'); loadAdminTariffs(); })
-    .catch(e => toast('Ошибка: ' + e.message, 'error'));
-}
-function openAdminServiceEdit(id) {
-  const s = State.services.find(r => r.id === id); if (!s) return;
-  const f = s.fields;
-  const sale = prompt('Цена продажи (₸):', f['Цена продажи'] || '0');
-  if (sale === null) return;
-  const sebes = prompt('Себестоимость (₸):', f['Себестоимость'] || '0');
-  if (sebes === null) return;
-  Airtable.update(CONFIG.TABLES.SERVICES, id, { 'Цена продажи': Number(sale), 'Себестоимость': Number(sebes) })
-    .then(() => { toast('Услуга обновлена ✓'); loadAdminServices(); })
-    .catch(e => toast('Ошибка: ' + e.message, 'error'));
-}
-function openAdminServiceAdd() { toast('Добавление услуг — скоро', 'info'); }
-window.openAdminEmployeeEdit = openAdminEmployeeEdit;
-window.openAdminTariffEdit   = openAdminTariffEdit;
-window.openAdminTariffAdd    = openAdminTariffAdd;
-window.deleteAdminTariff     = deleteAdminTariff;
-window.openAdminServiceEdit  = openAdminServiceEdit;
-window.openAdminServiceAdd   = openAdminServiceAdd;
 
 // ════════════════════════════════════════════════════
 // CHARTS — инициализация графиков аналитики

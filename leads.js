@@ -1,4 +1,179 @@
 // === LEADS, CLIENTS, DEALS, OPERATIONS MODULE ===
+let LeadUndoStack = [];
+
+// Вспомогательная функция для проверки наличия несохраненного ввода в активном текстовом поле
+function isInputDirty(lead) {
+  if (!lead || !document.activeElement) return false;
+  const el = document.activeElement;
+  const id = el.id;
+  const val = el.value !== undefined ? el.value.trim() : null;
+  
+  if (id === 'ei-name') {
+    const saved = (getField(lead.fields, CONFIG.LEAD_FIELDS.name) || '').trim();
+    return val !== saved;
+  }
+  if (id === 'ei-phone') {
+    const saved = (getField(lead.fields, CONFIG.LEAD_FIELDS.phone) || '').trim();
+    return val !== saved;
+  }
+  if (id === 'ei-instagram') {
+    const saved = (lead.fields['Instagram'] || '').trim();
+    return val !== saved;
+  }
+  if (id === 'ei-source') {
+    const saved = (getField(lead.fields, CONFIG.LEAD_FIELDS.source) || '').trim();
+    return val !== saved;
+  }
+  if (id === 'ei-niche') {
+    const saved = (lead.fields['Ниша'] || '').trim();
+    return val !== saved;
+  }
+  if (id === 'ei-budget') {
+    const saved = String(lead.fields['Бюджет'] || '');
+    return val !== saved;
+  }
+  if (id === 'ei-record-link') {
+    const saved = (lead.fields['Ссылка на запись'] || '').trim();
+    return val !== saved;
+  }
+  if (id === 'ei-comment') {
+    const saved = (lead.fields['Комментарий'] || '').trim();
+    return val !== saved;
+  }
+  return false;
+}
+
+// Функция для отмены последнего изменения лида
+async function undoLeadEdit(id) {
+  // Находим индекс последней записи для данного лида
+  let indexToPop = -1;
+  for (let i = LeadUndoStack.length - 1; i >= 0; i--) {
+    if (LeadUndoStack[i].leadId === id) {
+      indexToPop = i;
+      break;
+    }
+  }
+  if (indexToPop === -1) {
+    toast('Нет изменений для отмены', 'info');
+    return;
+  }
+  
+  const entry = LeadUndoStack.splice(indexToPop, 1)[0];
+  const snapshot = entry.fields;
+  const lead = State.leads.find(l => l.id === id);
+  if (!lead) return;
+  
+  // Подготовка полей для обновления в Baserow
+  const fieldsToUpdate = {};
+  for (const key in snapshot) {
+    if (key === 'Менеджер') {
+      const managerName = snapshot['Менеджер'];
+      const emp = managerName ? State.employees.find(e => e.fields['Имя'] === managerName) : null;
+      fieldsToUpdate['Менеджер'] = emp ? [emp.id] : [];
+    } else {
+      fieldsToUpdate[key] = snapshot[key];
+    }
+  }
+  
+  try {
+    toast('↩️ Отмена изменений...');
+    await Airtable.update(CONFIG.TABLES.LEADS, id, fieldsToUpdate);
+    
+    // Обновляем локальный стейт
+    Object.assign(lead.fields, snapshot);
+    
+    // Обновляем значения в DOM, если драуэр все еще открыт для этого лида
+    if (window._activeLeadId === id) {
+      const nameEl = document.getElementById('ei-name');
+      if (nameEl) nameEl.value = snapshot['Имя'] || '';
+      
+      const phoneEl = document.getElementById('ei-phone');
+      if (phoneEl) phoneEl.value = snapshot['Телефон'] || '';
+      
+      const instaEl = document.getElementById('ei-instagram');
+      if (instaEl) instaEl.value = snapshot['Instagram'] || '';
+      
+      const sourceEl = document.getElementById('ei-source');
+      if (sourceEl) sourceEl.value = snapshot['Источник'] || '';
+      
+      const nicheEl = document.getElementById('ei-niche');
+      if (nicheEl) nicheEl.value = snapshot['Ниша'] || '';
+      
+      const budgetEl = document.getElementById('ei-budget');
+      if (budgetEl) budgetEl.value = snapshot['Бюджет'] || '';
+      
+      const durationEl = document.getElementById('ei-duration');
+      if (durationEl) durationEl.value = snapshot['Длительность'] || '';
+      
+      const managerEl = document.getElementById('ei-manager');
+      if (managerEl) {
+        const managerName = snapshot['Менеджер'];
+        const emp = managerName ? State.employees.find(e => e.fields['Имя'] === managerName) : null;
+        managerEl.value = emp ? emp.id : '';
+      }
+      
+      const recordEl = document.getElementById('ei-record-link');
+      if (recordEl) recordEl.value = snapshot['Ссылка на запись'] || '';
+      
+      const nonTargetEl = document.getElementById('ei-nontarget-reason');
+      if (nonTargetEl) nonTargetEl.value = snapshot['Причина: Не целевой'] || '';
+      
+      const commentEl = document.getElementById('ei-comment');
+      if (commentEl) commentEl.value = snapshot['Комментарий'] || '';
+      
+      if (typeof updateAuditButtonState === 'function') {
+        updateAuditButtonState();
+      }
+    }
+    
+    renderKanban(State.leads);
+    renderLeadsStats();
+    renderLeadMiddleColumn(lead);
+    updateUndoButtonVisibility(id);
+    
+    toast('↩️ Изменение отменено (Cmd+Z)');
+    if (typeof syncGoogleCalendarEvent === 'function') {
+      syncGoogleCalendarEvent(lead).catch(console.error);
+    }
+  } catch (e) {
+    toast('Ошибка отмены: ' + e.message, 'error');
+  }
+}
+
+// Функция для управления видимостью кнопки "Отменить"
+function updateUndoButtonVisibility(id) {
+  const btn = document.getElementById('ei-undo-btn');
+  if (!btn) return;
+  const hasUndo = LeadUndoStack.some(entry => entry.leadId === id);
+  btn.style.display = hasUndo ? 'inline-flex' : 'none';
+}
+
+// Глобальный слушатель для отмены изменений по Cmd+Z / Ctrl+Z
+window.addEventListener('keydown', (e) => {
+  const drawer = document.getElementById('drawer-detail');
+  if (drawer && drawer.classList.contains('open') && window._activeLeadId) {
+    const isCmdZ = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z' && !e.shiftKey;
+    if (isCmdZ) {
+      const lead = State.leads.find(l => l.id === window._activeLeadId);
+      if (lead && isInputDirty(lead)) {
+        // Позволяем работать стандартному Cmd+Z браузера, если пользователь печатает
+        return;
+      }
+      
+      const hasUndoForLead = LeadUndoStack.some(entry => entry.leadId === window._activeLeadId);
+      if (hasUndoForLead) {
+        e.preventDefault();
+        if (document.activeElement) {
+          document.activeElement.blur();
+        }
+        setTimeout(() => {
+          undoLeadEdit(window._activeLeadId);
+        }, 50);
+      }
+    }
+  }
+});
+
 // Разбор даты и времени консультации лида
 function parseLeadConsultationDateTime(lead) {
   if (!lead || !lead.fields) return null;
@@ -34,6 +209,222 @@ function parseLeadConsultationDateTime(lead) {
   return parsedDate;
 }
 
+// Преобразование строкового значения даты в формат YYYY-MM-DD
+function convertDbDateToYmd(dateStr) {
+  if (!dateStr) return null;
+  const d = parseDateStr(dateStr);
+  if (!d) return null;
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+// Автосистематизация: перенос ниши и инстаграма из комментариев в отдельные поля
+function parseNewLeadsComments(leads) {
+  const updates = [];
+  
+  const formatInstagramUrl = (insta) => {
+    if (!insta) return null;
+    let val = insta.trim().replace(/[\u200e\u200f\u202a-\u202e]/g, '').trim();
+    const lower = val.toLowerCase();
+    if (lower === 'не указано' || lower === 'пока нет' || lower === 'нет' || lower === '-' || lower === 'неуказано' || lower === 'нет.' || lower === 'null') {
+      return null;
+    }
+    if (val.startsWith('http://') || val.startsWith('https://')) return val;
+    
+    let username = val;
+    if (username.startsWith('@')) username = username.slice(1);
+    username = username.replace(/\s+/g, '');
+    
+    if (username.length > 0 && !username.includes('/') && !username.includes('.')) {
+      return `https://www.instagram.com/${username}/`;
+    }
+    if (username.length > 0) {
+      if (username.toLowerCase().includes('instagram.com/')) {
+        const parts = username.split('instagram.com/');
+        if (parts[1]) return `https://www.instagram.com/${parts[1]}`;
+      }
+      if (!username.includes('/') && !username.includes('?') && !username.includes(':')) {
+        return `https://www.instagram.com/${username}/`;
+      }
+      if (username.includes('.') || username.includes('/')) {
+        return `https://${username}`;
+      }
+    }
+    return null;
+  };
+
+  const parseCommentFields = (comment) => {
+    if (!comment) return null;
+    const nicheRegex = /(?:Ниша|Ниша клиента):\s*([^|]+)/i;
+    const instaRegex = /(?:Инстаграм|Instagram|Инста|Insta):\s*([^|]+)/i;
+    
+    let niche = null;
+    let instagram = null;
+    
+    const nicheMatch = comment.match(nicheRegex);
+    if (nicheMatch) {
+      niche = nicheMatch[1].trim();
+      niche = niche.replace(/(?:\+7|8)[\s ]*\d{3}[\s ]*\d{3}[\s ]*\d{2}[\s ]*\d{2}/g, '').trim();
+      niche = niche.replace(/\+7\s*\(?\d{3}\)?\s*\d{3}\s*\d{2}\s*\d{2}/g, '').trim();
+      niche = niche.replace(/[\s\u202a-\u202f]+$/g, '').trim();
+      niche = niche.replace(/[\u200e\u200f\u202a-\u202e]/g, '').trim();
+    }
+    
+    const instaMatch = comment.match(instaRegex);
+    if (instaMatch) {
+      instagram = instaMatch[1].trim();
+      instagram = instagram.replace(/[\u200e\u200f\u202a-\u202e]/g, '').trim();
+    }
+    
+    let cleaned = comment;
+    cleaned = cleaned.replace(/(?:Ниша|Ниша клиента):\s*[^|]+(\|)?/gi, '');
+    cleaned = cleaned.replace(/(?:Инстаграм|Instagram|Инста|Insta):\s*[^|]+(\|)?/gi, '');
+    cleaned = cleaned.replace(/^[|\s\u202a-\u202f\n\r]+|[|\s\u202a-\u202f\n\r]+$/g, '');
+    cleaned = cleaned.replace(/\s*\|\s*/g, ' ').trim();
+    cleaned = cleaned.trim();
+    
+    if (niche || instagram) {
+      return { niche, instagram, cleanedComment: cleaned };
+    }
+    return null;
+  };
+
+  for (const lead of leads) {
+    const f = lead.fields;
+    const comment = f['Комментарий'] || '';
+    const parsed = parseCommentFields(comment);
+    
+    if (parsed) {
+      const updateFields = {};
+      let needsUpdate = false;
+      
+      if (parsed.niche && !f['Ниша']) {
+        updateFields['Ниша'] = parsed.niche;
+        f['Ниша'] = parsed.niche;
+        needsUpdate = true;
+      }
+      
+      if (parsed.instagram && !f['Instagram']) {
+        const validUrl = formatInstagramUrl(parsed.instagram);
+        if (validUrl) {
+          updateFields['Instagram'] = validUrl;
+          f['Instagram'] = validUrl;
+          needsUpdate = true;
+        } else {
+          needsUpdate = true;
+        }
+      }
+      
+      if (needsUpdate) {
+        updateFields['Комментарий'] = parsed.cleanedComment;
+        f['Комментарий'] = parsed.cleanedComment;
+        
+        updates.push({
+          id: lead.id,
+          fields: updateFields
+        });
+      }
+    }
+  }
+
+  if (updates.length > 0) {
+    console.log(`[Parse] Найдено ${updates.length} лидов с неструктурированными комментариями. Запуск переноса в поля...`);
+    Airtable.batchUpdate(CONFIG.TABLES.LEADS, updates)
+      .then(res => {
+        console.log(`[Parse] Успешно перенесены данные для ${updates.length} лидов.`);
+      })
+      .catch(err => {
+        console.error('[Parse] Ошибка переноса данных комментариев в Baserow:', err);
+      });
+  }
+}
+
+// Автосинхронизация и самолечение задач-консультаций для старых и новых лидов
+function syncConsultationTasks(leads) {
+  const updates = [];
+  const todayStr = getLocalDateString();
+  const nowStr = getLocalDateTimeString();
+
+  for (const lead of leads) {
+    const f = lead.fields;
+    const dateVal = f['Дата консультации'];
+    if (!dateVal) continue;
+
+    let tasks = [];
+    try {
+      tasks = safeJsonParse(f['Задачи'] || '[]');
+      if (!Array.isArray(tasks)) tasks = [];
+    } catch(e) {
+      tasks = [];
+    }
+
+    const hasActiveTask = tasks.some(t => (t.type === 'consult' || t.type === 'call') && !t.cancelled);
+    if (!hasActiveTask) {
+      const isDone = !!f['Консультация проведена'];
+      const timeVal = f['Время консультации'] || '12:00';
+      const managerName = f['Менеджер'] || 'Система';
+      const ymd = convertDbDateToYmd(dateVal);
+      if (!ymd) continue;
+
+      const assignDateVal = f['Дата назначения'] || f['Дата'] || todayStr;
+      const assignYmd = convertDbDateToYmd(assignDateVal) || todayStr;
+
+      const consultTask = {
+        id: 't_auto_' + Math.random().toString(36).substr(2, 9),
+        type: 'consult',
+        text: 'Провести консультацию',
+        assignedDate: assignYmd,
+        dueDate: ymd,
+        dueTime: timeVal,
+        done: isDone,
+        completedAt: isDone ? nowStr : '',
+        user: managerName,
+        createdAt: nowStr
+      };
+
+      tasks.push(consultTask);
+      f['Задачи'] = JSON.stringify(tasks);
+
+      let history = [];
+      try {
+        history = safeJsonParse(f['История'] || '[]');
+        if (!Array.isArray(history)) history = [];
+      } catch(e) {
+        history = [];
+      }
+      history.unshift({
+        date: new Date().toLocaleString('ru-RU'),
+        user: 'Система',
+        type: 'task_create',
+        taskId: consultTask.id,
+        details: 'Автоматически создана задача: "Провести консультацию"'
+      });
+      f['История'] = JSON.stringify(history);
+
+      updates.push({
+        id: lead.id,
+        fields: {
+          'Задачи': f['Задачи'],
+          'История': f['История']
+        }
+      });
+    }
+  }
+
+  if (updates.length > 0) {
+    console.log(`[Sync] Найдено ${updates.length} лидов, требующих создание задачи-консультации. Запуск фоновой синхронизации...`);
+    Airtable.batchUpdate(CONFIG.TABLES.LEADS, updates)
+      .then(res => {
+        console.log(`[Sync] Успешно синхронизировано ${updates.length} лидов в Baserow.`);
+      })
+      .catch(err => {
+        console.error('[Sync] Ошибка фоновой синхронизации в Baserow:', err);
+      });
+  }
+}
+
 async function loadLeads() {
   if (State.leads.length > 0) {
     renderPipelineSelect();
@@ -44,14 +435,15 @@ async function loadLeads() {
     document.getElementById('leads-stats').innerHTML = '';
   }
   try {
-    const [leads, clients, deals, pipelines, stages, employees, calls] = await Promise.all([
+    const [leads, clients, deals, pipelines, stages, employees, calls, incomes] = await Promise.all([
       Airtable.getAll(CONFIG.TABLES.LEADS),
       Airtable.getAll(CONFIG.TABLES.CLIENTS),
       Airtable.getAll(CONFIG.TABLES.DEALS),
       Airtable.getAll(CONFIG.TABLES.PIPELINES),
       Airtable.getAll(CONFIG.TABLES.STAGES),
       Airtable.getAll(CONFIG.TABLES.EMPLOYEES),
-      Airtable.getAll(CONFIG.TABLES.CALLS)
+      Airtable.getAll(CONFIG.TABLES.CALLS),
+      Airtable.getAll(CONFIG.TABLES.FINANCE_INCOMES)
     ]);
     State.leads = leads;
     State.clients = clients;
@@ -60,6 +452,11 @@ async function loadLeads() {
     State.stages = stages;
     State.employees = employees;
     State.calls = calls || [];
+    State.financeIncomes = incomes || [];
+
+    // Запуск автосинхронизации/миграции задач-консультаций
+    syncConsultationTasks(State.leads);
+    parseNewLeadsComments(State.leads);
 
     State.stages.sort((a, b) => (Number(a.fields['Порядок']) || 0) - (Number(b.fields['Порядок']) || 0));
 
@@ -125,18 +522,87 @@ async function refreshCRMData() {
   }
 }
 
+function getStatsPeriodDates() {
+  const now = new Date();
+  let start = new Date();
+  let end = new Date();
+
+  const setStartOfDay = (d) => {
+    d.setHours(0, 0, 0, 0);
+    return d;
+  };
+  const setEndOfDay = (d) => {
+    d.setHours(23, 59, 59, 999);
+    return d;
+  };
+
+  const period = State.statsPeriod || 'this_week';
+
+  if (period === 'today') {
+    start = setStartOfDay(new Date(now));
+    end = setEndOfDay(new Date(now));
+  } else if (period === 'this_week') {
+    start = setStartOfDay(new Date(now));
+    const day = start.getDay() || 7;
+    start.setDate(start.getDate() - (day - 1));
+    end = setEndOfDay(new Date(start));
+    end.setDate(end.getDate() + 6);
+  } else if (period === 'last_week') {
+    start = setStartOfDay(new Date(now));
+    const day = start.getDay() || 7;
+    start.setDate(start.getDate() - (day - 1) - 7);
+    end = setEndOfDay(new Date(start));
+    end.setDate(end.getDate() + 6);
+  } else if (period === 'month') {
+    start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+    end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+  } else if (period === 'custom') {
+    if (State.statsCustomFrom) {
+      start = setStartOfDay(new Date(State.statsCustomFrom));
+    } else {
+      start = new Date(0); // far past
+    }
+    if (State.statsCustomTo) {
+      end = setEndOfDay(new Date(State.statsCustomTo));
+    } else {
+      end = new Date(3000, 0, 1); // far future
+    }
+  }
+
+  return { start, end };
+}
+
+function onStatsPeriodChange(val) {
+  State.statsPeriod = val;
+  const customDatesEl = document.getElementById('stats-custom-dates');
+  if (customDatesEl) {
+    customDatesEl.style.display = val === 'custom' ? 'flex' : 'none';
+  }
+  renderLeadsStats();
+}
+
+function onStatsCustomDateChange() {
+  const fromEl = document.getElementById('stats-date-from');
+  const toEl = document.getElementById('stats-date-to');
+  if (fromEl) State.statsCustomFrom = fromEl.value;
+  if (toEl) State.statsCustomTo = toEl.value;
+  renderLeadsStats();
+}
+
+window.onStatsPeriodChange = onStatsPeriodChange;
+window.onStatsCustomDateChange = onStatsCustomDateChange;
+
 function renderLeadsStats() {
   const leads = State.leads;
-  const now   = new Date();
 
   function pluralizeDeals(count) {
     let n = Math.abs(count);
     n %= 100;
-    if (n >= 5 && n <= 20) return `${count} сделок`;
+    if (n >= 5 && n <= 20) return `${count} проектов`;
     n %= 10;
-    if (n === 1) return `${count} сделка`;
-    if (n >= 2 && n <= 4) return `${count} сделки`;
-    return `${count} сделок`;
+    if (n === 1) return `${count} проект`;
+    if (n >= 2 && n <= 4) return `${count} проекта`;
+    return `${count} проектов`;
   }
 
   // 1. Фильтруем лиды по текущей воронке
@@ -181,89 +647,156 @@ function renderLeadsStats() {
   // 2. Для активных счетчиков берем только неархивированные лиды
   const activePipelineLeads = currentPipelineLeads.filter(l => !isLeadArchived(l));
 
-  // Периоды
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const weekStart  = new Date(todayStart);
-  weekStart.setDate(todayStart.getDate() - ((todayStart.getDay()||7) - 1));
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  // Получаем границы выбранного периода
+  const period = getStatsPeriodDates();
 
-  // Основные цифры
-  const newLeads = activePipelineLeads.filter(l => { 
-    const s = getField(l.fields, CONFIG.LEAD_FIELDS.stage); 
-    return !s || s === 'Новая заявка'; 
+  // Счётчики по статусам воронки
+  const mainStageKeys = FUNNEL_STAGES.filter(s => s.group === 'main').map(s => s.key);
+  const inWorkCount     = activePipelineLeads.filter(l => mainStageKeys.includes(getField(l.fields, CONFIG.LEAD_FIELDS.stage))).length;
+  const warmingCount    = activePipelineLeads.filter(l => getField(l.fields, CONFIG.LEAD_FIELDS.stage) === 'На прогрев').length;
+  const unprocessedCount= activePipelineLeads.filter(l => getField(l.fields, CONFIG.LEAD_FIELDS.stage) === 'Не обработано').length;
+  const nonTargetCount  = activePipelineLeads.filter(l => getField(l.fields, CONFIG.LEAD_FIELDS.stage) === 'Не целевой').length;
+
+  const consultAppointedInPeriod = activePipelineLeads.filter(l => {
+    const tasks = safeJsonParse(l.fields['Задачи'] || '[]');
+    return tasks.some(t => {
+      if (t.type !== 'consult') return false;
+      const d = parseDateStr(t.assignedDate || t.dueDate);
+      return d && d >= period.start && d <= period.end;
+    });
   }).length;
-  
-  const thinking = activePipelineLeads.filter(l => { 
-    const s = getField(l.fields, CONFIG.LEAD_FIELDS.stage); 
-    return s === 'КП на рассмотрении' || s === 'Договор на рассмотрении'; 
+
+  const consultDoneInPeriod = activePipelineLeads.filter(l => {
+    const tasks = safeJsonParse(l.fields['Задачи'] || '[]');
+    return tasks.some(t => {
+      if (t.type !== 'consult' || !t.done) return false;
+      const d = parseDateStr(t.dueDate);
+      return d && d >= period.start && d <= period.end;
+    });
   }).length;
 
-  // Консультации сегодня: по дате консультации (совпадающей с сегодняшней датой)
-  const todayStr = getLocalDateString();
-
-  const consultAppointed = activePipelineLeads.filter(l => {
+  const awaitingPayment = activePipelineLeads.filter(l => {
     const s = getField(l.fields, CONFIG.LEAD_FIELDS.stage);
-    if (s !== 'Консультация назначена') return false;
-    return isSameDay(l.fields['Дата консультации'], todayStr) && !l.fields['Консультация проведена'];
-  }).length;
+    return s === 'Договор на рассмотрении';
+  });
+  const awaitingPaymentSum = awaitingPayment.reduce((s, l) => s + (Number(l.fields['Бюджет']) || 0), 0);
 
-  const consultDone = activePipelineLeads.filter(l => {
-    return isSameDay(l.fields['Дата консультации'], todayStr) && l.fields['Консультация проведена'] === true;
-  }).length;
-
-  // Продажи (по дате продажи, с фолбеком на дату создания для старых данных)
   const soldLeads = currentPipelineLeads.filter(l => getField(l.fields, CONFIG.LEAD_FIELDS.stage) === 'Продано');
   
-  function inPeriod(start) { 
-    return soldLeads.filter(l => { 
-      const d = parseDateStr(l.fields['Дата продажи']) || parseLeadDate(l); 
-      return d && d >= start; 
-    }); 
-  }
+  const soldInPeriod = soldLeads.filter(l => { 
+    const d = parseDateStr(l.fields['Дата продажи']) || parseLeadDate(l); 
+    return d && d >= period.start && d <= period.end; 
+  });
   
   const sumOf = arr => arr.reduce((s,l) => s + (Number(l.fields['Бюджет'])||0), 0);
   const sumOfPaid = arr => arr.reduce((s,l) => s + (Number(l.fields['Оплата'])||0), 0);
-  const sToday = inPeriod(todayStart);
-  const sWeek  = inPeriod(weekStart);
-  const sMonth = inPeriod(monthStart);
 
   const fmt = n => n.toLocaleString('ru-RU');
 
+  // Динамические текстовые ярлыки для периода
+  let periodLabel = 'за период';
+  let periodLabelLc = 'за период';
+  if (State.statsPeriod === 'today') {
+    periodLabel = 'сегодня';
+    periodLabelLc = 'сегодня';
+  } else if (State.statsPeriod === 'this_week') {
+    periodLabel = 'за неделю';
+    periodLabelLc = 'за неделю';
+  } else if (State.statsPeriod === 'last_week') {
+    periodLabel = 'за прошлую неделю';
+    periodLabelLc = 'за прошлую неделю';
+  } else if (State.statsPeriod === 'month') {
+    periodLabel = 'за месяц';
+    periodLabelLc = 'за месяц';
+  }
+
   document.getElementById('leads-stats').innerHTML = `
-    <div class="stats-grid">
-      <div class="stat-card">
-        <div class="stat-card-title">🎯 Всего лидов</div>
-        <div class="stat-card-num stat-card-num-default">${activePipelineLeads.length}</div>
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
+      <div style="font-size:14px; font-weight:700; color:var(--text); display:flex; align-items:center; gap:6px;">
+        📊 Показатели воронки
       </div>
-      <div class="stat-card">
-        <div class="stat-card-title">📅 Назначено сегодня</div>
-        <div class="stat-card-num stat-card-num-blue">${consultAppointed}</div>
+      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <span style="font-size:12px; color:var(--text2); font-weight:600;">Период показателей:</span>
+        <select id="stats-period-select" class="form-select compact-input" style="width:160px; margin:0;" onchange="onStatsPeriodChange(this.value)">
+          <option value="today" ${State.statsPeriod === 'today' ? 'selected' : ''}>Сегодня</option>
+          <option value="this_week" ${State.statsPeriod === 'this_week' ? 'selected' : ''}>Эта неделя</option>
+          <option value="last_week" ${State.statsPeriod === 'last_week' ? 'selected' : ''}>Прошлая неделя</option>
+          <option value="month" ${State.statsPeriod === 'month' ? 'selected' : ''}>За месяц</option>
+          <option value="custom" ${State.statsPeriod === 'custom' ? 'selected' : ''}>Диапазон дат...</option>
+        </select>
+        <div id="stats-custom-dates" style="display:${State.statsPeriod === 'custom' ? 'flex' : 'none'}; align-items:center; gap:6px;">
+          <input type="date" id="stats-date-from" class="form-input compact-input" style="width:130px; margin:0;" value="${State.statsCustomFrom || ''}" onchange="onStatsCustomDateChange()" onclick="try{this.showPicker()}catch(e){}"/>
+          <span style="color:var(--text2); font-size:12px;">—</span>
+          <input type="date" id="stats-date-to" class="form-input compact-input" style="width:130px; margin:0;" value="${State.statsCustomTo || ''}" onchange="onStatsCustomDateChange()" onclick="try{this.showPicker()}catch(e){}"/>
+        </div>
       </div>
-      <div class="stat-card">
-        <div class="stat-card-title">✅ Проведено сегодня</div>
-        <div class="stat-card-num stat-card-num-green">${consultDone}</div>
+    </div>
+
+    <!-- Tabular Stats Layout -->
+    <div class="stats-tables-container">
+      <!-- Table 1: Воронка -->
+      <div class="stats-table-wrapper" style="flex: 1.5; min-width: 0;">
+        <div class="stats-table-title">📊 Состояние воронки</div>
+        <table class="stats-data-table horizontal">
+          <thead>
+            <tr>
+              <th>🎯 Всего</th>
+              <th>⚙️ В работе</th>
+              <th>🔥 Прогрев</th>
+              <th>⏳ Не обр.</th>
+              <th>🚫 Нецел.</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="num val-default">${activePipelineLeads.length}</td>
+              <td class="num val-blue">${inWorkCount}</td>
+              <td class="num val-orange">${warmingCount}</td>
+              <td class="num val-default">${unprocessedCount}</td>
+              <td class="num" style="color: #94a3b8;">${nonTargetCount}</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
-      <div class="stat-card">
-        <div class="stat-card-title">💭 В ожидании</div>
-        <div class="stat-card-num stat-card-num-orange">${thinking}</div>
+
+      <!-- Table 2: Активность -->
+      <div class="stats-table-wrapper" style="flex: 0.8; min-width: 0;">
+        <div class="stats-table-title">🤝 Консультации ${periodLabelLc}</div>
+        <table class="stats-data-table horizontal">
+          <thead>
+            <tr>
+              <th>📅 Назначено</th>
+              <th>✅ Проведено</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="num val-blue">${consultAppointedInPeriod}</td>
+              <td class="num val-green">${consultDoneInPeriod}</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
-      <div class="stat-card">
-        <div class="stat-card-title">💰 Выручка сегодня</div>
-        <div class="stat-card-num stat-card-num-green" title="По договору">${fmt(sumOf(sToday))} ₸</div>
-        <div class="stat-card-sub" style="font-weight: 700; color: #a5b4fc; margin-top: 2px;">📥 В кассу: ${fmt(sumOfPaid(sToday))} ₸</div>
-        <div class="stat-card-sub" style="margin-top: 4px;">${pluralizeDeals(sToday.length)}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-card-title">📈 Выручка за неделю</div>
-        <div class="stat-card-num stat-card-num-green" title="По договору">${fmt(sumOf(sWeek))} ₸</div>
-        <div class="stat-card-sub" style="font-weight: 700; color: #a5b4fc; margin-top: 2px;">📥 В кассу: ${fmt(sumOfPaid(sWeek))} ₸</div>
-        <div class="stat-card-sub" style="margin-top: 4px;">${pluralizeDeals(sWeek.length)}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-card-title">📊 Выручка за месяц</div>
-        <div class="stat-card-num stat-card-num-green" title="По договору">${fmt(sumOf(sMonth))} ₸</div>
-        <div class="stat-card-sub" style="font-weight: 700; color: #a5b4fc; margin-top: 2px;">📥 В кассу: ${fmt(sumOfPaid(sMonth))} ₸</div>
-        <div class="stat-card-sub" style="margin-top: 4px;">${pluralizeDeals(sMonth.length)}</div>
+
+      <!-- Table 3: Финансы -->
+      <div class="stats-table-wrapper" style="flex: 1.8; min-width: 0;">
+        <div class="stats-table-title">💰 Финансы ${periodLabelLc}</div>
+        <table class="stats-data-table horizontal">
+          <thead>
+            <tr>
+              <th>💳 В ожидании</th>
+              <th>📈 Выручка</th>
+              <th>📥 В кассу</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="num val-orange">${fmt(awaitingPaymentSum)} ₸ <span class="sub">${awaitingPayment.length} дог.</span></td>
+              <td class="num val-green">${fmt(sumOf(soldInPeriod))} ₸ <span class="sub">${pluralizeDeals(soldInPeriod.length)}</span></td>
+              <td class="num val-blue">${fmt(sumOfPaid(soldInPeriod))} ₸ <span class="sub">${pluralizeDeals(soldInPeriod.length)}</span></td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>`;
 }
@@ -502,6 +1035,20 @@ function openCardContextMenu(e, id, stage) {
       </li>`;
       const consultDone = lead.fields['Консультация проведена'];
       html += `<li onclick="toggleConsultDone('${id}')"><span>${consultDone ? '☑️ Снять отметку конс.' : '✅ Консультация проведена'}</span></li>`;
+      
+      const currentMgr = lead.fields['Менеджер'] || '';
+      html += `<li><span>👤 Назначить менеджера...</span><span class="arrow">▶</span>
+        <ul class="submenu" style="max-height: 250px; overflow-y: auto;">
+          <li onclick="assignLeadManager('${id}', '')">${!currentMgr ? '✓ ' : ''}— Снять менеджера —</li>
+          ${State.employees.map(emp => {
+            const name = emp.fields['Имя'] || '';
+            const empId = emp.id;
+            const isSelected = currentMgr === name;
+            return `<li onclick="assignLeadManager('${id}', '${empId}')">${isSelected ? '✓ ' : ''}${escHtml(name)}</li>`;
+          }).join('')}
+        </ul>
+      </li>`;
+
       html += `<li class="danger" onclick="toggleLeadArchive('${id}', true)"><span>📁 Архивировать</span></li>`;
     }
   }
@@ -950,20 +1497,31 @@ function renderKanban(leads) {
                 <div class="kanban-card-name">${name}</div>
                 ${mgBadge}
               </div>
+              ${lead.fields['Ниша'] ? `<div class="kanban-card-sub" style="color:#a5b4fc; font-weight: 500;">💼 ${escHtml(lead.fields['Ниша'])}</div>` : ''}
               ${phone  ? `<div class="kanban-card-sub">📱 ${escHtml(phone)}</div>` : ''}
               ${igHandle ? `<div class="kanban-card-sub" style="color:#c026d3; cursor:pointer;" onclick="event.stopPropagation(); copyInstagram('${escHtml(igRaw)}')">📸 ${escHtml(igHandle)}</div>` : ''}
               ${cd     ? `<div class="kanban-card-sub" style="color:#3b82f6">📅 ${escHtml(cd)} ${escHtml(lead.fields['Время консультации']||'')}</div>` :
                 date    ? `<div class="kanban-card-sub">📋 ${date}</div>` : ''}
               ${(() => {
                 const tasksList = safeJsonParse(lead.fields['Задачи'] || '[]');
-                const activeTasksList = tasksList.filter(t => !t.done && t.dueDate);
+                const activeTasksList = tasksList.filter(t => !t.done && !t.cancelled && t.dueDate);
                 if (activeTasksList.length === 0) return '';
                 
-                // Сортируем задачи по возрастанию срока, чтобы найти ближайшую
-                activeTasksList.sort((a, b) => a.dueDate.localeCompare(b.dueDate));
-                const t = activeTasksList[0];
-                
                 const todayStr = getLocalDateString();
+                const overdueTasks = activeTasksList.filter(t => t.dueDate < todayStr);
+                const nonOverdueTasks = activeTasksList.filter(t => t.dueDate >= todayStr);
+
+                let t = null;
+                if (nonOverdueTasks.length > 0) {
+                  nonOverdueTasks.sort((a, b) => a.dueDate.localeCompare(b.dueDate) || (a.dueTime || '').localeCompare(b.dueTime || ''));
+                  t = nonOverdueTasks[0];
+                } else if (overdueTasks.length > 0) {
+                  overdueTasks.sort((a, b) => a.dueDate.localeCompare(b.dueDate) || (a.dueTime || '').localeCompare(b.dueTime || ''));
+                  t = overdueTasks[0];
+                }
+
+                if (!t) return '';
+                
                 const isOverdue = t.dueDate < todayStr;
                 const isToday = t.dueDate === todayStr;
                 const color = isOverdue ? '#fca5a5' : (isToday ? '#fcd34d' : '#93c5fd'); // мягкий красный, желтый, голубой
@@ -1542,10 +2100,113 @@ function renderLeadMiddleColumn(lead) {
   }).join('');
 
   const todayStr = getLocalDateString();
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowStr = getLocalDateString(tomorrow);
 
-  const timelineHtml = history.length === 0
+  const renderedTaskIds = new Set();
+
+  function parseHistoryDate(dateStr) {
+    if (!dateStr) return new Date(0);
+    let m = String(dateStr).match(/(\d{2})\.(\d{2})\.(\d{4}),?\s+(\d{2}):(\d{2}):?(\d{2})?/);
+    if (m) {
+      const hh = parseInt(m[4], 10) || 0;
+      const mm = parseInt(m[5], 10) || 0;
+      const ss = parseInt(m[6], 10) || 0;
+      return new Date(+m[3], +m[2]-1, +m[1], hh, mm, ss);
+    }
+    m = String(dateStr).match(/(\d{2})\.(\d{2})\.(\d{4})/);
+    if (m) {
+      return new Date(+m[3], +m[2]-1, +m[1]);
+    }
+    const d = new Date(dateStr);
+    return isNaN(d) ? new Date(0) : d;
+  }
+
+  const combinedHistory = [...history];
+
+  // 1. Виртуальные события для выполненных задач без записей в истории
+  for (const task of tasks) {
+    if (task.done && !task.cancelled) {
+      const isReferenced = history.some(h => {
+        if (h.taskId === task.id) return true;
+        if (h.type === 'task_done' || h.type === 'task_create') {
+          const match = String(h.details || '').match(/задача:\s*"(.*?)"/);
+          const taskText = match ? match[1] : h.details;
+          return taskText === task.text || String(h.details || '').includes(task.text);
+        }
+        return false;
+      });
+
+      if (!isReferenced) {
+        let taskDate = '';
+        if (task.completedAt) {
+          try {
+            taskDate = new Date(task.completedAt).toLocaleString('ru-RU');
+          } catch(e) {
+            taskDate = task.completedAt;
+          }
+        } else if (task.dueDate) {
+          const parts = task.dueDate.split('-');
+          taskDate = parts.length === 3 ? `${parts[2]}.${parts[1]}.${parts[0]}, ${task.dueTime || '12:00'}:00` : task.dueDate;
+        }
+
+        combinedHistory.push({
+          date: taskDate,
+          user: task.user || 'Система',
+          type: 'task_done',
+          taskId: task.id,
+          details: `Выполнена задача: "${task.text}"`,
+          isVirtual: true
+        });
+      }
+    }
+  }
+
+  // 2. Виртуальные события для активных задач без записей в истории
+  for (const task of tasks) {
+    if (!task.done && !task.cancelled) {
+      const isReferenced = history.some(h => {
+        if (h.taskId === task.id) return true;
+        if (h.type === 'task_create') {
+          const match = String(h.details || '').match(/Создана задача:\s*"(.*?)"/);
+          const taskText = match ? match[1] : h.details;
+          return taskText === task.text || String(h.details || '').includes(task.text);
+        }
+        return false;
+      });
+
+      if (!isReferenced) {
+        let taskDate = '';
+        if (task.createdAt) {
+          try {
+            taskDate = new Date(task.createdAt).toLocaleString('ru-RU');
+          } catch(e) {
+            taskDate = task.createdAt;
+          }
+        } else if (task.dueDate) {
+          const parts = task.dueDate.split('-');
+          taskDate = parts.length === 3 ? `${parts[2]}.${parts[1]}.${parts[0]}, ${task.dueTime || '12:00'}:00` : task.dueDate;
+        }
+
+        combinedHistory.push({
+          date: taskDate,
+          user: task.user || 'Система',
+          type: 'task_create',
+          taskId: task.id,
+          details: `Создана задача: "${task.text}"`,
+          isVirtual: true
+        });
+      }
+    }
+  }
+
+  // Сортируем историю: новые сверху (по убыванию даты)
+  combinedHistory.sort((a, b) => parseHistoryDate(b.date) - parseHistoryDate(a.date));
+
+  const timelineHtml = combinedHistory.length === 0
     ? '<div style="color:var(--text2); font-size:13px; font-style:italic; text-align:center; padding:40px 0;">История пуста. Напишите первый комментарий или поставьте задачу!</div>'
-    : history.map((h) => {
+    : combinedHistory.map((h) => {
         const isComment = h.type === 'comment_add';
         const isTaskCreate = h.type === 'task_create';
         const isTaskDone = h.type === 'task_done';
@@ -1597,27 +2258,81 @@ function renderLeadMiddleColumn(lead) {
         }
 
         // Render task item with interactive checkbox
-        if (isTaskCreate && h.taskId) {
-          const task = tasks.find(t => t.id === h.taskId);
-          if (task) {
-            const isOverdue = !task.done && task.dueDate && task.dueDate < todayStr;
-            const isToday = !task.done && task.dueDate === todayStr;
-            const dueClass = isOverdue ? 'overdue' : (isToday ? 'today' : 'future');
-            const timeStr = task.dueTime ? ` в ${task.dueTime}` : '';
-            const statusLabel = task.done ? 'Выполнено' : (isOverdue ? 'Просрочено' : (isToday ? 'Сегодня' : 'Предстоит'));
-            
-            return `
-              <div class="timeline-task-card" style="background:${bg}; border:${border}; border-radius:12px; padding:12px; margin-bottom:4px; display:flex; gap:10px; align-items:flex-start; box-shadow: 0 2px 6px rgba(0,0,0,0.1); align-self: stretch;">
-                <input type="checkbox" class="task-checkbox" ${task.done ? 'checked' : ''} onclick="toggleTaskDone('${id}', '${task.id}')" style="margin-top:2px; width:16px; height:16px; cursor:pointer; flex-shrink:0;">
-                <div style="flex:1;">
-                  <div style="font-size:13px; font-weight:600; color:#fff; ${task.done ? 'text-decoration:line-through; opacity:0.6;' : ''}">${escHtml(task.text)}</div>
-                  <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:6px; font-size:10px;">
-                    <span style="color:var(--text2)">👤 ${escHtml(task.user || '—')}</span>
-                    <span class="task-due ${dueClass}" style="font-weight:700; padding:1px 6px; border-radius:4px;">${statusLabel}: ${formatDate(task.dueDate)}${timeStr}</span>
+        if (isTaskCreate) {
+          let taskId = h.taskId;
+          if (!taskId) {
+            // Match legacy task creation in history
+            const match = h.details.match(/Создана задача:\s*"(.*?)"/);
+            const taskText = match ? match[1] : h.details;
+            const foundTask = tasks.find(t => !renderedTaskIds.has(t.id) && (t.text === taskText || h.details.includes(t.text)));
+            if (foundTask) {
+              taskId = foundTask.id;
+              h.taskId = taskId;
+            }
+          }
+          if (taskId) {
+            const task = tasks.find(t => t.id === taskId);
+            if (task) {
+              renderedTaskIds.add(task.id);
+              const isOverdue = !task.done && !task.cancelled && task.dueDate && task.dueDate < todayStr;
+              const isToday = !task.done && !task.cancelled && task.dueDate === todayStr;
+              const dueClass = isOverdue ? 'overdue' : (isToday ? 'today' : 'future');
+              const timeStr = task.dueTime ? ` в ${task.dueTime}` : '';
+              const statusLabel = task.done ? 'Выполнено' : (isOverdue ? 'Просрочено' : (isToday ? 'Сегодня' : 'Предстоит'));
+              
+              return `
+                <div class="timeline-task-card" style="background:${bg}; border:${border}; border-radius:12px; padding:12px; margin-bottom:4px; display:flex; gap:10px; align-items:flex-start; box-shadow: 0 2px 6px rgba(0,0,0,0.1); align-self: stretch; position:relative;">
+                  ${task.cancelled ? 
+                    `<span onclick="toggleTaskCancelled('${id}', '${task.id}')" style="margin-top:2px; font-size:14px; cursor:pointer; flex-shrink:0; width:16px; height:16px; display:flex; align-items:center; justify-content:center; color:#ef4444;" title="Восстановить задачу">❌</span>` :
+                    `<input type="checkbox" class="task-checkbox" ${task.done ? 'checked' : ''} onclick="toggleTaskDone('${id}', '${task.id}')" style="margin-top:2px; width:16px; height:16px; cursor:pointer; flex-shrink:0;">`
+                  }
+                  <div style="flex:1; padding-right:20px;">
+                    <div style="font-size:13px; font-weight:600; color:#fff; ${(task.done || task.cancelled) ? 'text-decoration:line-through; opacity:0.5;' : ''}">${escHtml(task.text)}</div>
+                    ${task.cancelled ? '' : `
+                      <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:6px; font-size:10px;">
+                        <span style="color:var(--text2)">👤 ${escHtml(task.user || '—')}</span>
+                        <span class="task-due ${dueClass}" style="font-weight:700; padding:1px 6px; border-radius:4px;">${statusLabel}: ${formatDate(task.dueDate)}${timeStr}</span>
+                      </div>
+                    `}
+                  </div>
+                  ${(!task.done && !task.cancelled) ? `
+                    <span onclick="toggleTaskCancelled('${id}', '${task.id}')" style="position:absolute; right:12px; top:12px; font-size:11px; cursor:pointer; opacity:0.4; transition:opacity 0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.4" title="Отменить задачу">❌</span>
+                  ` : ''}
+                </div>
+              `;
+            }
+          }
+        }
+
+        if (isTaskDone) {
+          let taskId = h.taskId;
+          if (!taskId) {
+            const match = h.details.match(/Выполнена задача:\s*"(.*?)"/);
+            const taskText = match ? match[1] : h.details;
+            const foundTask = tasks.find(t => !renderedTaskIds.has(t.id) && (t.text === taskText || h.details.includes(t.text)));
+            if (foundTask) {
+              taskId = foundTask.id;
+              h.taskId = taskId;
+            }
+          }
+          if (taskId) {
+            const task = tasks.find(t => t.id === taskId);
+            if (task && !renderedTaskIds.has(task.id)) {
+              renderedTaskIds.add(task.id);
+              const timeStr = task.dueTime ? ` в ${task.dueTime}` : '';
+              return `
+                <div class="timeline-task-card" style="background:${bg}; border:${border}; border-radius:12px; padding:12px; margin-bottom:4px; display:flex; gap:10px; align-items:flex-start; box-shadow: 0 2px 6px rgba(0,0,0,0.1); align-self: stretch; position:relative;">
+                  <input type="checkbox" class="task-checkbox" checked onclick="toggleTaskDone('${id}', '${task.id}')" style="margin-top:2px; width:16px; height:16px; cursor:pointer; flex-shrink:0;">
+                  <div style="flex:1; padding-right:20px;">
+                    <div style="font-size:13px; font-weight:600; color:#fff; text-decoration:line-through; opacity:0.5;">${escHtml(task.text)}</div>
+                    <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:6px; font-size:10px;">
+                      <span style="color:var(--text2)">👤 ${escHtml(h.user || task.user || '—')}</span>
+                      <span class="task-due done" style="font-weight:700; padding:1px 6px; border-radius:4px; background:rgba(16,185,129,0.15); color:#10b981;">Выполнено: ${formatDate(task.dueDate)}${timeStr}</span>
+                    </div>
                   </div>
                 </div>
-              </div>
-            `;
+              `;
+            }
           }
         }
 
@@ -1632,6 +2347,40 @@ function renderLeadMiddleColumn(lead) {
           </div>
         `;
       }).join('');
+
+  // Active tasks rendering (legacy or new, as long as they are not done/cancelled)
+  const activeTasks = tasks.filter(t => !t.done && !t.cancelled);
+  let activeTasksHtml = '';
+  if (activeTasks.length > 0) {
+    activeTasksHtml = `
+      <div class="active-tasks-section" style="margin-bottom:12px; align-self: stretch;">
+        <div style="font-size:12px; font-weight:800; color:var(--text2); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:8px;">📋 Активные задачи (${activeTasks.length})</div>
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          ${activeTasks.map(task => {
+            const isOverdue = task.dueDate && task.dueDate < todayStr;
+            const isToday = task.dueDate === todayStr;
+            const dueClass = isOverdue ? 'overdue' : (isToday ? 'today' : 'future');
+            const timeStr = task.dueTime ? ` в ${task.dueTime}` : '';
+            const statusLabel = isOverdue ? 'Просрочено' : (isToday ? 'Сегодня' : 'Предстоит');
+            
+            return `
+              <div class="timeline-task-card" style="background:rgba(245,158,11,0.04); border:1px solid rgba(245,158,11,0.15); border-radius:12px; padding:12px; display:flex; gap:10px; align-items:flex-start; box-shadow: 0 2px 6px rgba(0,0,0,0.1); position:relative; align-self:stretch;">
+                <input type="checkbox" class="task-checkbox" onclick="toggleTaskDone('${id}', '${task.id}')" style="margin-top:2px; width:16px; height:16px; cursor:pointer; flex-shrink:0;">
+                <div style="flex:1; padding-right:20px;">
+                  <div style="font-size:13px; font-weight:600; color:#fff;">${escHtml(task.text)}</div>
+                  <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:6px; font-size:10px;">
+                    <span style="color:var(--text2)">👤 ${escHtml(task.user || '—')}</span>
+                    <span class="task-due ${dueClass}" style="font-weight:700; padding:1px 6px; border-radius:4px;">${statusLabel}: ${formatDate(task.dueDate)}${timeStr}</span>
+                  </div>
+                </div>
+                <span onclick="toggleTaskCancelled('${id}', '${task.id}')" style="position:absolute; right:12px; top:12px; font-size:11px; cursor:pointer; opacity:0.4; transition:opacity 0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.4" title="Отменить задачу">❌</span>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    `;
+  }
 
   container.innerHTML = `
     <div style="display:flex; flex-direction:column; height: 100%; box-sizing: border-box;">
@@ -1648,10 +2397,17 @@ function renderLeadMiddleColumn(lead) {
 
         <div style="padding:10px; background:rgba(255,255,255,0.02); border-radius:12px; border:1px solid rgba(255,255,255,0.04)">
           <div style="font-size:11px; font-weight:700; color:var(--text2); margin-bottom:6px; display:flex; align-items:center; gap:4px;">📌 Поставить задачу с напоминанием:</div>
-          <input type="text" id="ei-new-task-text" class="form-input compact-input" placeholder="Что нужно напомнить..." style="width:100%; margin-bottom:6px; min-height: unset !important;">
+          <div style="display:flex; gap:6px; margin-bottom:6px;">
+            <select id="ei-new-task-type" class="form-select compact-input" style="width:110px; padding:4px 8px !important; height:28px !important; font-size:12px !important; margin:0;" onchange="onNewTaskTypeChange(this.value)">
+              <option value="call" selected>Звонок</option>
+              <option value="consult">Консультация</option>
+              <option value="task">Задача</option>
+            </select>
+            <input type="text" id="ei-new-task-text" class="form-input compact-input" placeholder="Что нужно напомнить..." value="Связаться с клиентом" style="flex:1; margin:0; min-height: unset !important; height:28px !important; font-size:12px !important; padding:2px 8px !important;">
+          </div>
           <div class="inline-form-row" style="display:flex; gap:6px; align-items:center;">
-            <input type="date" id="ei-new-task-date" class="form-input compact-input" onclick="try{this.showPicker()}catch(e){}" style="flex:1; height:28px !important; font-size:12px !important; padding:2px 6px !important;">
-            <input type="time" id="ei-new-task-time" class="form-input compact-input" onclick="try{this.showPicker()}catch(e){}" style="width:80px; height:28px !important; font-size:12px !important; padding:2px 6px !important;" title="Время напоминания">
+            <input type="date" id="ei-new-task-date" class="form-input compact-input" value="${tomorrowStr}" onclick="try{this.showPicker()}catch(e){}" style="flex:1; height:28px !important; font-size:12px !important; padding:2px 6px !important;">
+            <input type="time" id="ei-new-task-time" class="form-input compact-input" value="12:00" onclick="try{this.showPicker()}catch(e){}" style="width:80px; height:28px !important; font-size:12px !important; padding:2px 6px !important;" title="Время напоминания">
             <button class="btn btn-save-compact" onclick="addLeadTask('${id}')" style="padding:4px 10px !important; font-size:12px !important; height:28px !important; margin:0; line-height:1;">Поставить</button>
           </div>
         </div>
@@ -1661,6 +2417,7 @@ function renderLeadMiddleColumn(lead) {
 
       <!-- Scrolling timeline section -->
       <div style="flex:1; overflow-y:auto; padding:12px; display:flex; flex-direction:column; gap:8px;" id="lead-timeline-scroller">
+        ${activeTasksHtml}
         <div style="font-size:12px; font-weight:800; color:var(--text2); text-transform:uppercase; letter-spacing:0.05em; display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; flex-shrink:0;">
           <span>📜 Лента активности</span>
           <span style="font-size:10px; font-weight:600; text-transform:none; color:var(--text3);">${history.length} событий</span>
@@ -1732,13 +2489,71 @@ async function addLeadComment(id) {
   }
 }
 
+function calculateLeadPayments(lead) {
+  if (!lead) return 0;
+  const leadDeals = (State.deals || []).filter(d => {
+    const contactLinks = d.fields['Контакты ID'] || [];
+    const isLinkedByContact = contactLinks.some(c => String(c.id) === String(lead.id));
+    const leadProjectLinks = lead.fields['Проекты'] || [];
+    const isLinkedByProject = leadProjectLinks.some(p => String(p.id) === String(d.id));
+    return isLinkedByContact || isLinkedByProject;
+  });
+  
+  const dealIds = leadDeals.map(d => String(d.id));
+  if (dealIds.length === 0) return 0;
+  
+  const leadIncomes = (State.financeIncomes || []).filter(inc => {
+    const orderLinks = inc.fields['Заказ'] || [];
+    return orderLinks.some(o => dealIds.includes(String(o.id)));
+  });
+  
+  return leadIncomes.reduce((sum, inc) => sum + (Number(inc.fields['Сумма']) || 0), 0);
+}
+
+function getSyncedConsultationFields(tasks) {
+  const activeTasks = tasks.filter(t => (t.type === 'consult' || t.type === 'call') && !t.cancelled);
+  if (activeTasks.length > 0) {
+    // Сортируем: сначала невыполненные, затем выполненные, по типу (consult в приоритете), по дате
+    activeTasks.sort((a, b) => {
+      if (a.done !== b.done) return a.done ? 1 : -1;
+      if (a.type !== b.type) {
+        if (a.type === 'consult') return -1;
+        if (b.type === 'consult') return 1;
+      }
+      const dateA = a.dueDate + 'T' + (a.dueTime || '00:00');
+      const dateB = b.dueDate + 'T' + (b.dueTime || '00:00');
+      return dateA.localeCompare(dateB);
+    });
+    const primaryTask = activeTasks[0];
+    
+    // Преобразуем YYYY-MM-DD в DD.MM.YYYY для базы данных
+    let dbDate = primaryTask.dueDate;
+    const m = String(primaryTask.dueDate).match(/(\d{4})-(\d{2})-(\d{2})/);
+    if (m) dbDate = `${m[3]}.${m[2]}.${m[1]}`;
+    
+    return {
+      'Дата консультации': dbDate,
+      'Время консультации': primaryTask.dueTime || '',
+      'Консультация проведена': primaryTask.done
+    };
+  } else {
+    return {
+      'Дата консультации': null,
+      'Время консультации': null,
+      'Консультация проведена': false
+    };
+  }
+}
+
 async function addLeadTask(id) {
   const textEl = document.getElementById('ei-new-task-text');
   const dateEl = document.getElementById('ei-new-task-date');
   const timeEl = document.getElementById('ei-new-task-time');
+  const typeEl = document.getElementById('ei-new-task-type');
   const text = textEl?.value.trim();
   const dueDate = dateEl?.value;
-  const dueTime = timeEl?.value || '';
+  const dueTime = timeEl?.value || '12:00';
+  const taskType = typeEl?.value || 'call';
 
   if (!text) { toast('Введите текст задачи', 'error'); return; }
   if (!dueDate) { toast('Выберите срок выполнения', 'error'); return; }
@@ -1753,6 +2568,7 @@ async function addLeadTask(id) {
   const newTask = {
     id: 't_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
     text: text,
+    type: taskType,
     dueDate: dueDate,
     dueTime: dueTime,
     done: false,
@@ -1760,6 +2576,10 @@ async function addLeadTask(id) {
     completedAt: '',
     user: currentUser
   };
+  if (taskType === 'consult') {
+    const assignDateVal = lead.fields['Дата назначения'] || lead.fields['Дата'] || getLocalDateString();
+    newTask.assignedDate = convertDbDateToYmd(assignDateVal) || getLocalDateString();
+  }
   tasks.push(newTask);
 
   const history = safeJsonParse(lead.fields['История'] || '[]');
@@ -1775,10 +2595,12 @@ async function addLeadTask(id) {
     'Задачи': JSON.stringify(tasks),
     'История': JSON.stringify(history)
   };
+  const synced = getSyncedConsultationFields(tasks);
+  Object.assign(updates, synced);
 
   textEl.value = '';
   dateEl.value = '';
-  if (timeEl) timeEl.value = '';
+  if (timeEl) timeEl.value = '12:00';
 
   try {
     await Airtable.update(CONFIG.TABLES.LEADS, id, updates);
@@ -1803,6 +2625,9 @@ async function toggleTaskDone(leadId, taskId) {
   if (!task) return;
 
   task.done = !task.done;
+  if (task.done) {
+    task.cancelled = false;
+  }
   task.completedAt = task.done ? dateStr : '';
 
   const history = safeJsonParse(lead.fields['История'] || '[]');
@@ -1817,6 +2642,8 @@ async function toggleTaskDone(leadId, taskId) {
     'Задачи': JSON.stringify(tasks),
     'История': JSON.stringify(history)
   };
+  const synced = getSyncedConsultationFields(tasks);
+  Object.assign(updates, synced);
 
   try {
     await Airtable.update(CONFIG.TABLES.LEADS, leadId, updates);
@@ -1829,10 +2656,67 @@ async function toggleTaskDone(leadId, taskId) {
   }
 }
 
+async function toggleTaskCancelled(leadId, taskId) {
+  const lead = State.leads.find(l => l.id === leadId);
+  if (!lead) return;
+
+  const currentUser = localStorage.getItem('crm_current_user') || 'Система';
+  const dateStr = new Date().toLocaleString('ru-RU');
+
+  const tasks = safeJsonParse(lead.fields['Задачи'] || '[]');
+  const task = tasks.find(t => t.id === taskId);
+  if (!task) return;
+
+  task.cancelled = !task.cancelled;
+  if (task.cancelled) {
+    task.done = false;
+    task.completedAt = '';
+  }
+
+  const history = safeJsonParse(lead.fields['История'] || '[]');
+  history.unshift({
+    date: dateStr,
+    user: currentUser,
+    type: 'task_cancelled',
+    details: task.cancelled ? `Отменена задача: "${task.text}"` : `Задача возвращена в работу (после отмены): "${task.text}"`
+  });
+
+  const updates = {
+    'Задачи': JSON.stringify(tasks),
+    'История': JSON.stringify(history)
+  };
+  const synced = getSyncedConsultationFields(tasks);
+  Object.assign(updates, synced);
+
+  try {
+    await Airtable.update(CONFIG.TABLES.LEADS, leadId, updates);
+    Object.assign(lead.fields, updates);
+    renderLeadMiddleColumn(lead);
+    renderKanban(State.leads);
+    toast(task.cancelled ? 'Задача отменена' : 'Задача возвращена в работу');
+  } catch (e) {
+    toast('Ошибка обновления задачи: ' + e.message, 'error');
+  }
+}
+
+function onNewTaskTypeChange(type) {
+  const textEl = document.getElementById('ei-new-task-text');
+  if (!textEl) return;
+  if (type === 'call') {
+    textEl.value = 'Связаться с клиентом';
+  } else if (type === 'consult') {
+    textEl.value = 'Провести консультацию';
+  } else {
+    textEl.value = '';
+  }
+}
+
 // Expose these functions to window context
 window.addLeadComment = addLeadComment;
 window.addLeadTask = addLeadTask;
 window.toggleTaskDone = toggleTaskDone;
+window.toggleTaskCancelled = toggleTaskCancelled;
+window.onNewTaskTypeChange = onNewTaskTypeChange;
 
 // ─── Синхронизация с Google Календарем
 async function syncGoogleCalendarEvent(lead) {
@@ -1926,29 +2810,14 @@ async function openLeadDetail(id, stage) {
   document.getElementById('detail-content').innerHTML = `
     <div class="drawer-handle"></div>
     
-    <!-- HEADER BAR: Title, status and Save Button in reach -->
+    <!-- HEADER BAR: Title and status -->
     <div class="drawer-header" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.06); padding-bottom:12px; margin-bottom:12px; flex-wrap: wrap; gap:10px; padding-right: 40px;">
       <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
         <h3 class="drawer-title" style="margin:0; font-size:18px; font-weight:800; color:#fff;">🎯 ${name}</h3>
         <div>${statusBadge(stage)}</div>
-      </div>
-      <div style="display:flex; gap:8px;">
-        <button class="btn btn-save-compact" onclick="saveLeadEdit('${id}')">💾 Сохранить</button>
+        <button id="ei-undo-btn" class="btn btn-secondary btn-compact" style="display:none; align-items:center; gap:6px; font-weight:700; background: rgba(99,102,241,0.15); border-color: rgba(99,102,241,0.3); color: #a5b4fc; padding: 4px 10px; height: auto;" onclick="document.activeElement?.blur(); setTimeout(() => undoLeadEdit('${id}'), 50);" title="Отменить последнее изменение (Cmd+Z)">↩️ Отменить</button>
       </div>
     </div>
-
-    ${(f['Дата консультации'] || stage === 'Консультация назначена' || stage === 'КП на рассмотрении' || stage === 'Договор на рассмотрении' || f['Консультация проведена']) ? `
-      <div class="card" style="margin-bottom:12px; border-color:#3b82f6; padding:10px 14px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
-        <div style="color:#3b82f6; font-weight:700; font-size:13px; display:flex; align-items:center; gap:6px;">🔔 Консультация</div>
-        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; font-weight:600">
-          <input type="checkbox" id="ei-consult-done" ${f['Консультация проведена']?'checked':''}
-            onchange="toggleConsultDone('${id}')"
-            style="width:16px; height:16px; accent-color:#6366f1; cursor:pointer">
-          <span style="color:${f['Консультация проведена']?'#34d399':'var(--text2)'}">
-            ${f['Консультация проведена'] ? '✅ Проведена' : 'Проведена?'}
-          </span>
-        </label>
-      </div>` : ''}
 
     <div class="drawer-three-cols">
       <!-- LEFT COLUMN: Fields strictly stacked vertically -->
@@ -1977,12 +2846,16 @@ async function openLeadDetail(id, stage) {
             <input class="form-input compact-input" id="ei-source" value="${escHtml(getField(f,CONFIG.LEAD_FIELDS.source))}"/>
           </div>
           <div class="form-group">
+            <label class="form-label">Ниша</label>
+            <input class="form-input compact-input" id="ei-niche" placeholder="Введите нишу клиента" value="${escHtml(f['Ниша']||'')}"/>
+          </div>
+          <div class="form-group">
             <label class="form-label">Бюджет (₸)</label>
             <input class="form-input compact-input" id="ei-budget" type="number" placeholder="0" value="${escHtml(String(f['Бюджет']||''))}"/>
           </div>
           <div class="form-group">
             <label class="form-label">Оплачено (₸)</label>
-            <input class="form-input compact-input" id="ei-paid" type="number" placeholder="0" value="${escHtml(String(f['Оплата']||''))}"/>
+            <input class="form-input compact-input" id="ei-paid" type="number" placeholder="0" value="${calculateLeadPayments(lead)}" readonly disabled style="background: rgba(255,255,255,0.03); border-color: rgba(255,255,255,0.06); cursor: not-allowed; color: #a5b4fc; font-weight: 700;"/>
           </div>
           <div class="form-group">
             <label class="form-label">Менеджер</label>
@@ -1992,16 +2865,8 @@ async function openLeadDetail(id, stage) {
             </select>
           </div>
           <div class="form-group">
-            <label class="form-label">📅 Дата консультации</label>
-            <input class="form-input compact-input" id="ei-consult-date" type="date" onclick="try{this.showPicker()}catch(e){}" value="${toInputDateFormat(f['Дата консультации'])}"/>
-          </div>
-          <div class="form-group">
-            <label class="form-label">🕒 Время консультации</label>
-            <input class="form-input compact-input" id="ei-consult-time" type="time" onclick="try{this.showPicker()}catch(e){}" value="${escHtml(f['Время консультации']||'')}"/>
-          </div>
-          <div class="form-group">
-            <label class="form-label">📝 Дата назначения</label>
-            <input class="form-input compact-input" id="ei-assign-date" type="date" onclick="try{this.showPicker()}catch(e){}" value="${toInputDateFormat(f['Дата назначения'])}"/>
+            <label class="form-label">⏱ Длительность (мин)</label>
+            <input class="form-input compact-input" id="ei-duration" type="number" placeholder="По умолчанию (60/30)" value="${escHtml(String(f['Длительность']||''))}"/>
           </div>
           <div class="form-group form-group-full">
             <label class="form-label">🔗 Ссылка на запись встречи</label>
@@ -2063,54 +2928,70 @@ async function openLeadDetail(id, stage) {
 
   openDrawer('drawer-detail');
   renderLeadMiddleColumn(lead);
+
+  // Настройка автосохранения при выходе из поля или изменении
+  const attachAutoSave = (selector, eventType = 'blur') => {
+    const el = document.getElementById(selector);
+    if (el) {
+      el.addEventListener(eventType, () => {
+        saveLeadEdit(id, true);
+      });
+    }
+  };
+
+  attachAutoSave('ei-name', 'blur');
+  attachAutoSave('ei-phone', 'blur');
+  attachAutoSave('ei-instagram', 'blur');
+  attachAutoSave('ei-source', 'blur');
+  attachAutoSave('ei-niche', 'blur');
+  attachAutoSave('ei-budget', 'blur');
+  attachAutoSave('ei-manager', 'change');
+  attachAutoSave('ei-duration', 'blur');
+  attachAutoSave('ei-record-link', 'blur');
+  attachAutoSave('ei-nontarget-reason', 'change');
+  attachAutoSave('ei-comment', 'blur');
+  updateUndoButtonVisibility(id);
 }
 
 // ─── Сохранить редактирование лида
-async function saveLeadEdit(id) {
+async function saveLeadEdit(id, silent = false) {
   const lead = State.leads.find(l => l.id === id); if (!lead) return;
   const stageField = getStageFieldName(lead.fields);
   const empId  = document.getElementById('ei-manager')?.value;
   const emp    = empId ? State.employees.find(e => e.id === empId) : null;
   
-  const consultDate = document.getElementById('ei-consult-date')?.value;
-  const consultTime = document.getElementById('ei-consult-time')?.value.trim() || '';
-  const assignDate = document.getElementById('ei-assign-date')?.value;
+  const niche = document.getElementById('ei-niche')?.value.trim() || '';
 
   const fields = {
     'Имя':     document.getElementById('ei-name')?.value.trim()   || '',
     'Телефон': document.getElementById('ei-phone')?.value.trim()  || '',
     'Источник':document.getElementById('ei-source')?.value.trim() || '',
+    'Ниша':    niche,
     'Комментарий': document.getElementById('ei-comment')?.value.trim() || '',
-    'Дата консультации': toDbDateFormat(consultDate),
-    'Время консультации': consultTime,
   };
   
-  let dbAssignDate = toDbDateFormat(assignDate);
   const currentStage = lead.fields[stageField] || 'Новая заявка';
   const stagesOrdered = FUNNEL_STAGES.map(s => s.key);
   const stageIdx = stagesOrdered.indexOf(currentStage);
   const consultIdx = stagesOrdered.indexOf('Консультация назначена');
-  
   const hasManager = emp || lead.fields['Менеджер'];
-  if (!dbAssignDate && stageIdx >= consultIdx && hasManager) {
-    dbAssignDate = new Date().toLocaleDateString('ru-RU');
+  if (!lead.fields['Дата назначения'] && stageIdx >= consultIdx && hasManager) {
+    fields['Дата назначения'] = new Date().toLocaleDateString('ru-RU');
   }
   
-  fields['Дата назначения'] = dbAssignDate;
-  
   const budget = Number(document.getElementById('ei-budget')?.value);
-  const paid = Number(document.getElementById('ei-paid')?.value);
-  const consultDone = document.getElementById('ei-consult-done')?.checked ?? null;
+  const calculatedPaid = calculateLeadPayments(lead);
   const nonTargetEl = document.getElementById('ei-nontarget-reason');
   const recordLink = document.getElementById('ei-record-link')?.value.trim() || null;
   const instagram  = document.getElementById('ei-instagram')?.value.trim() || null;
   if (budget) fields['Бюджет'] = budget; else fields['Бюджет'] = null;
-  if (paid) fields['Оплата'] = paid; else fields['Оплата'] = null;
+  fields['Оплата'] = calculatedPaid > 0 ? calculatedPaid : null;
   fields['Менеджер'] = empId ? empId : [];
-  if (consultDone !== null) fields['Консультация проведена'] = consultDone;
   if (nonTargetEl) fields['Причина: Не целевой'] = nonTargetEl.value || null;
   fields['Ссылка на запись'] = recordLink;
   fields['Instagram'] = instagram;
+  const durationVal = document.getElementById('ei-duration')?.value.trim();
+  fields['Длительность'] = durationVal ? Number(durationVal) : null;
 
   // ─── Логируем изменения полей в историю
   const changedFieldsList = [];
@@ -2118,7 +2999,9 @@ async function saveLeadEdit(id) {
     { key: 'Имя',                    label: 'Имя' },
     { key: 'Телефон',                label: 'Телефон' },
     { key: 'Источник',               label: 'Источник' },
+    { key: 'Ниша',                   label: 'Ниша' },
     { key: 'Бюджет',                 label: 'Бюджет' },
+    { key: 'Длительность',           label: 'Длительность' },
     { key: 'Оплата',                 label: 'Оплачено' },
     { key: 'Дата консультации',      label: 'Дата консультации' },
     { key: 'Время консультации',     label: 'Время консультации' },
@@ -2150,28 +3033,95 @@ async function saveLeadEdit(id) {
     fields['История'] = JSON.stringify(history);
   }
 
+  if (changedFieldsList.length === 0) return;
+
+  // Сохраняем снимок перед применением изменений для отмены по Cmd+Z
+  const snapshot = {};
+  const fieldsToSnap = ['Имя', 'Телефон', 'Источник', 'Ниша', 'Комментарий', 'Бюджет', 'Длительность', 'Менеджер', 'Причина: Не целевой', 'Ссылка на запись', 'Instagram', 'История', 'Дата назначения'];
+  for (const key of fieldsToSnap) {
+    snapshot[key] = lead.fields[key] !== undefined ? JSON.parse(JSON.stringify(lead.fields[key])) : null;
+  }
+  LeadUndoStack.push({ leadId: id, fields: snapshot });
+  if (LeadUndoStack.length > 50) {
+    LeadUndoStack.shift();
+  }
+
   try {
     await Airtable.update(CONFIG.TABLES.LEADS, id, fields);
     Object.assign(lead.fields, fields);
-    if (emp) lead.fields['Менеджер'] = emp.fields['Имя'] || '';
-    else lead.fields['Менеджер'] = '';
-    if (budget) lead.fields['Бюджет'] = budget;
-    else lead.fields['Бюджет'] = '';
-    if (paid) lead.fields['Оплата'] = paid;
-    else lead.fields['Оплата'] = '';
-    if (consultDone !== null) lead.fields['Консультация проведена'] = consultDone;
-    if (nonTargetEl) lead.fields['Причина: Не целевой'] = nonTargetEl.value || '';
-    if (recordLink !== null) lead.fields['Ссылка на запись'] = recordLink;
-    if (fields['История']) lead.fields['История'] = fields['История'];
-    if (instagram !== null) lead.fields['Instagram'] = instagram || '';
+    lead.fields['Менеджер'] = emp ? (emp.fields['Имя'] || '') : '';
 
     renderKanban(State.leads);
     renderLeadsStats();
     renderLeadMiddleColumn(lead);
-    toast('Изменения сохранены ✓');
+    updateUndoButtonVisibility(id);
+    if (!silent) {
+      toast('Изменения сохранены ✓');
+    }
     syncGoogleCalendarEvent(lead).catch(console.error);
   } catch(e) { toast('Ошибка: ' + e.message, 'error'); }
 }
+
+async function assignLeadManager(leadId, employeeId) {
+  closeAllDropdownMenus();
+  
+  const lead = State.leads.find(l => l.id === leadId);
+  if (!lead) return;
+  
+  const emp = State.employees.find(e => String(e.id) === String(employeeId));
+  const newMgrName = emp ? (emp.fields['Имя'] || '') : '';
+  const oldMgrName = lead.fields['Менеджер'] || '';
+  
+  if (newMgrName === oldMgrName) return;
+  
+  const updates = {
+    'Менеджер': employeeId ? [Number(employeeId)] : []
+  };
+  
+  const history = safeJsonParse(lead.fields['История'] || '[]');
+  const currentUser = localStorage.getItem('crm_current_user') || 'Система';
+  history.unshift({
+    date: new Date().toLocaleString('ru-RU'),
+    user: currentUser,
+    type: 'edit_fields',
+    details: `Менеджер: «${oldMgrName || '—'}» → «${newMgrName || '—'}»`
+  });
+  updates['История'] = JSON.stringify(history);
+  
+  const stageField = getStageFieldName(lead.fields);
+  const currentStage = lead.fields[stageField] || 'Новая заявка';
+  const stagesOrdered = FUNNEL_STAGES.map(s => s.key);
+  const stageIdx = stagesOrdered.indexOf(currentStage);
+  const consultIdx = stagesOrdered.indexOf('Консультация назначена');
+  if (!lead.fields['Дата назначения'] && stageIdx >= consultIdx && newMgrName) {
+    updates['Дата назначения'] = new Date().toLocaleDateString('ru-RU');
+  }
+
+  // Optimistic update
+  lead.fields['Менеджер'] = newMgrName;
+  lead.fields['История'] = updates['История'];
+  if (updates['Дата назначения']) {
+    lead.fields['Дата назначения'] = updates['Дата назначения'];
+  }
+  
+  renderKanban(State.leads);
+  renderLeadsStats();
+  
+  // If lead detail drawer is open, re-render
+  const drawer = document.getElementById('drawer-detail');
+  if (drawer && drawer.classList.contains('open') && window._activeLeadId === leadId) {
+    openLeadDetail(leadId, currentStage);
+  }
+  
+  try {
+    await Airtable.update(CONFIG.TABLES.LEADS, leadId, updates);
+    toast(`Менеджер изменен на «${newMgrName || '—'}» ✓`);
+  } catch (e) {
+    toast('Ошибка назначения менеджера: ' + e.message, 'error');
+    await loadLeads();
+  }
+}
+window.assignLeadManager = assignLeadManager;
 
 // ─── Удалить лид
 async function deleteLead(id) {
@@ -2196,43 +3146,72 @@ async function toggleConsultDone(id) {
   const lead = State.leads.find(l => l.id === id);
   if (!lead) return;
   const newVal = !lead.fields['Консультация проведена'];
-  lead.fields['Консультация проведена'] = newVal; // оптимистично
-  renderKanban(State.leads);
-  renderLeadsStats(); // Сразу обновляем счетчики в шапке!
   
-  // Если открыт детальный просмотр этого лида, обновим чекбокс в drawer в реальном времени
+  const tasks = safeJsonParse(lead.fields['Задачи'] || '[]');
+  const consultTasks = tasks.filter(t => t.type === 'consult' && !t.cancelled);
+  if (consultTasks.length > 0) {
+    consultTasks.forEach(t => {
+      t.done = newVal;
+      t.completedAt = newVal ? new Date().toLocaleString('ru-RU') : '';
+    });
+  } else if (newVal) {
+    const currentUser = localStorage.getItem('crm_current_user') || 'Система';
+    const dateStr = new Date().toLocaleString('ru-RU');
+    const todayStr = getLocalDateString();
+    
+    const assignDateVal = lead.fields['Дата назначения'] || lead.fields['Дата'] || todayStr;
+    const assignYmd = convertDbDateToYmd(assignDateVal) || todayStr;
+    
+    const newTask = {
+      id: 't_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+      text: 'Провести консультацию',
+      type: 'consult',
+      assignedDate: assignYmd,
+      dueDate: todayStr,
+      dueTime: '12:00',
+      done: true,
+      createdAt: dateStr,
+      completedAt: dateStr,
+      user: currentUser
+    };
+    tasks.push(newTask);
+  }
+  
+  const history = safeJsonParse(lead.fields['История'] || '[]');
+  history.unshift({
+    date: new Date().toLocaleString('ru-RU'),
+    user: localStorage.getItem('crm_current_user') || 'Система',
+    type: 'task_done',
+    details: newVal ? 'Выполнена задача: "Провести консультацию"' : 'Задача возвращена в работу: "Провести консультацию"'
+  });
+
+  lead.fields['Консультация проведена'] = newVal;
+  lead.fields['Задачи'] = JSON.stringify(tasks);
+  lead.fields['История'] = JSON.stringify(history);
+
+  const synced = getSyncedConsultationFields(tasks);
+  Object.assign(lead.fields, synced);
+
+  renderKanban(State.leads);
+  renderLeadsStats();
+
   const drawer = document.getElementById('drawer-detail');
   if (drawer && drawer.classList.contains('open') && window._activeLeadId === id) {
-    const cb = document.getElementById('ei-consult-done');
-    if (cb) {
-      cb.checked = newVal;
-      const labelSpan = cb.nextElementSibling;
-      if (labelSpan) {
-        labelSpan.style.color = newVal ? '#34d399' : 'var(--text2)';
-        labelSpan.textContent = newVal ? '✅ Проведена' : 'Проведена?';
-      }
-    }
+    renderLeadMiddleColumn(lead);
   }
 
   try {
-    await Airtable.update(CONFIG.TABLES.LEADS, id, { 'Консультация проведена': newVal });
+    await Airtable.update(CONFIG.TABLES.LEADS, id, {
+      'Консультация проведена': newVal,
+      'Задачи': JSON.stringify(tasks),
+      'История': JSON.stringify(history),
+      'Дата консультации': lead.fields['Дата консультации'],
+      'Время консультации': lead.fields['Время консультации']
+    });
     toast(newVal ? '✅ Консультация проведена' : '☑️ Отметка снята');
   } catch(e) {
-    lead.fields['Консультация проведена'] = !newVal; // откат
-    renderKanban(State.leads);
-    renderLeadsStats();
-    if (drawer && drawer.classList.contains('open') && window._activeLeadId === id) {
-      const cb = document.getElementById('ei-consult-done');
-      if (cb) {
-        cb.checked = !newVal;
-        const labelSpan = cb.nextElementSibling;
-        if (labelSpan) {
-          labelSpan.style.color = (!newVal) ? '#34d399' : 'var(--text2)';
-          labelSpan.textContent = (!newVal) ? '✅ Проведена' : 'Проведена?';
-        }
-      }
-    }
-    toast('Ошибка: ' + e.message, 'error');
+    toast('Ошибка сохранения: ' + e.message, 'error');
+    await loadLeads();
   }
 }
 
@@ -2773,11 +3752,14 @@ async function saveLead() {
     const consultDate = document.getElementById('l-consult-date')?.value || '';
     const consultTime = document.getElementById('l-consult-time')?.value || '';
 
+    const nicheVal = document.getElementById('l-niche')?.value.trim() || '';
+
     const apiFields = {
       'Имя':       name,
       'Телефон':   document.getElementById('l-phone').value.trim(),
       'Instagram': document.getElementById('l-instagram')?.value.trim() || '',
       'Источник':  document.getElementById('l-source').value.trim(),
+      'Ниша':      nicheVal,
       'Комментарий': document.getElementById('l-comment').value.trim(),
       'Воронка':   stageId,
       'Дата':      new Date().toLocaleDateString('ru-RU'),
@@ -2814,7 +3796,7 @@ async function saveLead() {
     toast('🎯 Лид добавлен ✓');
 
     // Сбрасываем форму
-    ['l-name','l-phone','l-instagram','l-source','l-budget','l-comment','l-consult-date','l-consult-time']
+    ['l-name','l-phone','l-instagram','l-source','l-niche','l-budget','l-comment','l-consult-date','l-consult-time']
       .forEach(i => { const el = document.getElementById(i); if(el) el.value = ''; });
     const mgSel = document.getElementById('l-manager');
     if (mgSel) mgSel.value = '';
@@ -3392,25 +4374,28 @@ function openContactLaterModal(leadId, newStage, fromStage, beforeId) {
     `;
   }
 
-  // Заполняем дефолтную дату: завтрашний день
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const tomorrowStr = getLocalDateString(tomorrow);
-  
+  const isConsult = (_contactLaterNewStage === 'Консультация назначена');
+
   const dateEl = document.getElementById('contact-later-date');
   if (dateEl) {
-    dateEl.value = tomorrowStr;
+    if (isConsult) {
+      dateEl.value = getLocalDateString();
+    } else {
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      dateEl.value = getLocalDateString(tomorrow);
+    }
   }
 
   const timeEl = document.getElementById('contact-later-time');
   if (timeEl) {
-    timeEl.value = '';
+    timeEl.value = '12:00';
   }
 
   const textEl = document.getElementById('contact-later-text');
   if (textEl) {
-    textEl.value = 'Связаться позднее';
-    textEl.placeholder = 'Например: Позвонить и узнать решение по КП';
+    textEl.value = isConsult ? 'Провести консультацию' : 'Связаться позднее';
+    textEl.placeholder = isConsult ? 'Например: Провести zoom-презентацию' : 'Например: Позвонить и узнать решение по КП';
   }
 
   openDrawer('drawer-contact-later');
@@ -3452,11 +4437,7 @@ function openQuickTaskModal(leadId) {
 
   const timeEl = document.getElementById('contact-later-time');
   if (timeEl) {
-    const now = new Date();
-    now.setHours(now.getHours() + 1);
-    const HH = String(now.getHours()).padStart(2, '0');
-    const MM = String(now.getMinutes()).padStart(2, '0');
-    timeEl.value = `${HH}:${MM}`;
+    timeEl.value = '12:00';
   }
 
   const textEl = document.getElementById('contact-later-text');
@@ -3489,7 +4470,7 @@ async function confirmContactLater() {
   const timeEl = document.getElementById('contact-later-time');
   const textEl = document.getElementById('contact-later-text');
   const dueDate = dateEl?.value;
-  const dueTime = timeEl?.value || '';
+  const dueTime = timeEl?.value || '12:00';
   const text = textEl?.value.trim();
 
   if (!dueDate) { toast('Выберите дату', 'error'); return; }
@@ -3510,9 +4491,11 @@ async function confirmContactLater() {
 
     // 1. Создаем новую задачу
     const tasks = safeJsonParse(lead.fields['Задачи'] || '[]');
+    const isConsult = (_contactLaterNewStage === 'Консультация назначена');
     const newTask = {
       id: 't_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
       text: text,
+      type: isConsult ? 'consult' : 'call',
       dueDate: dueDate,
       dueTime: dueTime,
       done: false,
@@ -3525,6 +4508,8 @@ async function confirmContactLater() {
     const updates = {
       'Задачи': JSON.stringify(tasks)
     };
+    const synced = getSyncedConsultationFields(tasks);
+    Object.assign(updates, synced);
 
     const history = safeJsonParse(lead.fields['История'] || '[]');
 
@@ -3558,7 +4543,8 @@ async function confirmContactLater() {
         [stageField]: _contactLaterNewStage,
         [stageField + ' ID']: stageId ? String(stageId) : '',
         'Задачи': JSON.stringify(tasks),
-        'История': JSON.stringify(history)
+        'История': JSON.stringify(history),
+        ...synced
       });
 
       if (_contactLaterBeforeId !== undefined) {
@@ -3576,7 +4562,8 @@ async function confirmContactLater() {
       updates['История'] = JSON.stringify(history);
       Object.assign(lead.fields, {
         'Задачи': JSON.stringify(tasks),
-        'История': JSON.stringify(history)
+        'История': JSON.stringify(history),
+        ...synced
       });
     }
 
@@ -3817,9 +4804,38 @@ function clearLeadsFilters() {
 const CalState = {
   currentYear: new Date().getFullYear(),
   currentMonth: new Date().getMonth(),
-  selectedDate: new Date().toISOString().substring(0, 10),
-  filterManager: ''
+  selectedDate: getLocalDateString(),
+  filterManager: '',
+  view: localStorage.getItem('crm_calendar_view') || 'month'
 };
+
+function syncCalendarViewButtons() {
+  const view = CalState.view;
+  const btnMonth = document.getElementById('btn-cal-view-month');
+  const btnWeek = document.getElementById('btn-cal-view-week');
+  const btnDay = document.getElementById('btn-cal-view-day');
+  
+  if (btnMonth) {
+    btnMonth.style.background = view === 'month' ? '#3b82f6' : 'transparent';
+    btnMonth.style.color = view === 'month' ? '#fff' : 'var(--text2)';
+  }
+  if (btnWeek) {
+    btnWeek.style.background = view === 'week' ? '#3b82f6' : 'transparent';
+    btnWeek.style.color = view === 'week' ? '#fff' : 'var(--text2)';
+  }
+  if (btnDay) {
+    btnDay.style.background = view === 'day' ? '#3b82f6' : 'transparent';
+    btnDay.style.color = view === 'day' ? '#fff' : 'var(--text2)';
+  }
+}
+
+function setCalendarView(view) {
+  CalState.view = view;
+  localStorage.setItem('crm_calendar_view', view);
+  syncCalendarViewButtons();
+  renderCalendar();
+}
+window.setCalendarView = setCalendarView;
 
 async function loadCalendarPage() {
   const container = document.getElementById('calendar-view-container');
@@ -3865,6 +4881,7 @@ async function loadCalendarPage() {
     }
   }
 
+  syncCalendarViewButtons();
   renderCalendar();
 }
 
@@ -3873,21 +4890,318 @@ function renderCalendar() {
   const titleEl = document.getElementById('calendar-title');
   if (!container) return;
 
-  // Обновляем заголовок с названием месяца
+  const isMobile = window.innerWidth < 768;
+
+  if (CalState.view === 'month') {
+    // Обновляем заголовок с названием месяца
+    const monthNames = [
+      'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
+      'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'
+    ];
+    if (titleEl) {
+      titleEl.textContent = `${monthNames[CalState.currentMonth]} ${CalState.currentYear}`;
+    }
+
+    if (isMobile) {
+      renderMobileCalendar(container);
+    } else {
+      renderDesktopCalendar(container);
+    }
+  } else if (CalState.view === 'week') {
+    renderGridCalendar(container, titleEl, 7);
+  } else if (CalState.view === 'day') {
+    renderGridCalendar(container, titleEl, 1);
+  }
+}
+
+function isCallEvent(lead) {
+  const tasks = safeJsonParse(lead.fields['Задачи'] || '[]');
+  const cDate = lead.fields['Дата консультации'];
+  const cTime = lead.fields['Время консультации'];
+  if (!cDate) return false;
+  
+  const ymd = convertDbDateToYmd(cDate);
+  const match = tasks.find(t => t.dueDate === ymd && t.dueTime === cTime && !t.cancelled);
+  if (match) {
+    return match.type === 'call' || String(match.text || '').toLowerCase().includes('звон');
+  }
+  
+  const stage = lead.fields['Воронка'];
+  if (stage === 'В обработке (3 касания)' || stage === 'Связаться позднее') {
+    return true;
+  }
+  return false;
+}
+
+function renderGridCalendar(container, titleEl, numDays) {
+  // 1. Рассчитываем отображаемые даты
+  const days = [];
+  const selected = new Date(CalState.selectedDate);
+  
+  if (numDays === 7) {
+    // Находим понедельник текущей недели
+    const day = selected.getDay();
+    const monday = new Date(selected);
+    monday.setDate(selected.getDate() - (day === 0 ? 6 : day - 1));
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(monday);
+      d.setDate(monday.getDate() + i);
+      days.push(d);
+    }
+  } else {
+    // Только выбранный день
+    days.push(selected);
+  }
+
+  // 2. Обновляем заголовок календаря
   const monthNames = [
     'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
     'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'
   ];
+  const monthNamesGenitive = [
+    'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+    'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'
+  ];
+  
   if (titleEl) {
-    titleEl.textContent = `${monthNames[CalState.currentMonth]} ${CalState.currentYear}`;
+    if (numDays === 1) {
+      const dayNum = selected.getDate();
+      const monthGen = monthNamesGenitive[selected.getMonth()];
+      const year = selected.getFullYear();
+      titleEl.textContent = `${dayNum} ${monthGen} ${year}`;
+    } else {
+      const first = days[0];
+      const last = days[6];
+      const fYear = first.getFullYear();
+      const fMonth = first.getMonth();
+      const lYear = last.getFullYear();
+      const lMonth = last.getMonth();
+      
+      if (fYear !== lYear) {
+        titleEl.textContent = `${monthNames[fMonth]} ${fYear} – ${monthNames[lMonth]} ${lYear}`;
+      } else if (fMonth !== lMonth) {
+        titleEl.textContent = `${monthNames[fMonth]} – ${monthNames[lMonth]} ${fYear}`;
+      } else {
+        titleEl.textContent = `${monthNames[fMonth]} ${fYear}`;
+      }
+    }
   }
 
-  const isMobile = window.innerWidth < 768;
+  // 3. Генерация шапки дней
+  const shortDayNames = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+  const fullDayNames = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'];
+  
+  let headerDaysHtml = '';
+  const today = new Date();
+  
+  days.forEach(d => {
+    const dNum = d.getDate();
+    const jsDay = d.getDay();
+    const dayIndex = jsDay === 0 ? 6 : jsDay - 1;
+    const name = numDays === 1 ? fullDayNames[dayIndex] : shortDayNames[dayIndex];
+    const isToday = today.getDate() === d.getDate() && today.getMonth() === d.getMonth() && today.getFullYear() === d.getFullYear();
+    
+    headerDaysHtml += `
+      <div class="weekly-header-day ${isToday ? 'today' : ''}">
+        <span class="weekly-header-day-name">${escHtml(name)}</span>
+        <span class="weekly-header-day-num">${dNum}</span>
+      </div>
+    `;
+  });
 
-  if (isMobile) {
-    renderMobileCalendar(container);
-  } else {
-    renderDesktopCalendar(container);
+  // 4. Генерация левой шкалы часов (08:00 - 20:00)
+  let hoursHtml = '';
+  for (let h = 8; h <= 20; h++) {
+    const timeStr = `${String(h).padStart(2, '0')}:00`;
+    hoursHtml += `<div class="weekly-hour-label">${timeStr}</div>`;
+  }
+
+  // 5. Генерация колонок дней
+  let columnsHtml = '';
+  const isMobile = window.innerWidth < 768;
+  const inlineGridStyle = (isMobile && numDays === 7) ? 'style="min-width: 600px;"' : '';
+  const inlineScrollStyle = (isMobile && numDays === 7) ? 'style="overflow-x: auto;"' : '';
+
+  days.forEach(d => {
+    const dIso = getLocalDateString(d);
+    
+    // Линии сетки в фоне
+    let linesHtml = '';
+    for (let h = 8; h <= 20; h++) {
+      linesHtml += `<div class="weekly-day-grid-line"></div>`;
+    }
+
+    // Красный маркер текущего времени
+    let timelineHtml = '';
+    const isToday = today.getDate() === d.getDate() && today.getMonth() === d.getMonth() && today.getFullYear() === d.getFullYear();
+    if (isToday) {
+      const curHour = today.getHours();
+      const curMin = today.getMinutes();
+      if (curHour >= 8 && curHour < 21) {
+        const topPx = (curHour - 8) * 60 + curMin;
+        timelineHtml = `
+          <div class="weekly-now-indicator" style="top: ${topPx}px">
+            <div class="weekly-now-indicator-circle"></div>
+          </div>
+        `;
+      }
+    }
+
+    // Выборка и фильтрация лидов на этот день
+    let dayLeads = State.leads.filter(l => {
+      const cDate = l.fields['Дата консультации'];
+      return cDate && convertDbDateToYmd(cDate) === dIso;
+    });
+
+    if (CalState.filterManager) {
+      dayLeads = dayLeads.filter(l => l.fields['Менеджер'] === CalState.filterManager);
+    }
+
+    // Парсинг времени и длительности событий
+    const parsedEvents = [];
+    dayLeads.forEach(l => {
+      const tStr = l.fields['Время консультации'];
+      if (!tStr) return;
+      const parts = tStr.split(':');
+      if (parts.length < 2) return;
+      let hr = parseInt(parts[0], 10);
+      let min = parseInt(parts[1], 10);
+      if (isNaN(hr) || isNaN(min)) return;
+      
+      if (hr < 8) { hr = 8; min = 0; }
+      if (hr >= 21) { hr = 20; min = 59; }
+
+      const start = (hr - 8) * 60 + min;
+      
+      // Определяем длительность (Длительность из базы -> дефолт 30 минут для всех событий)
+      let duration = Number(l.fields['Длительность']);
+      if (isNaN(duration) || duration <= 0) {
+        duration = 30;
+      }
+      
+      const end = start + duration;
+      const height = duration - 2; // зазор 2px снизу
+      parsedEvents.push({ lead: l, start, end, height, originalTime: tStr });
+    });
+
+    // Сортировка по времени начала
+    parsedEvents.sort((a, b) => {
+      if (a.start !== b.start) return a.start - b.start;
+      return (b.end - b.start) - (a.end - a.start);
+    });
+
+    // Разделение по пересекающимся кластерам
+    const clusters = [];
+    let currentCluster = [];
+    let clusterEnd = -1;
+
+    parsedEvents.forEach(ev => {
+      if (ev.start >= clusterEnd) {
+        if (currentCluster.length > 0) {
+          clusters.push(currentCluster);
+        }
+        currentCluster = [ev];
+        clusterEnd = ev.end;
+      } else {
+        currentCluster.push(ev);
+        if (ev.end > clusterEnd) {
+          clusterEnd = ev.end;
+        }
+      }
+    });
+    if (currentCluster.length > 0) {
+      clusters.push(currentCluster);
+    }
+
+    // Распределение на дорожки (columns) внутри кластеров
+    clusters.forEach(cluster => {
+      const cols = [];
+      cluster.forEach(ev => {
+        let placed = false;
+        for (let c = 0; c < cols.length; c++) {
+          const lastEv = cols[c][cols[c].length - 1];
+          if (ev.start >= lastEv.end) {
+            cols[c].push(ev);
+            ev.colIndex = c;
+            placed = true;
+            break;
+          }
+        }
+        if (!placed) {
+          cols.push([ev]);
+          ev.colIndex = cols.length - 1;
+        }
+      });
+
+      const colCount = cols.length;
+      cluster.forEach(ev => {
+        ev.colCount = colCount;
+        ev.width = 100 / colCount;
+        ev.left = ev.colIndex * ev.width;
+      });
+    });
+
+    // Формирование HTML карточек
+    let eventsHtml = '';
+    parsedEvents.forEach(ev => {
+      const l = ev.lead;
+      const time = ev.originalTime;
+      const name = getField(l.fields, CONFIG.LEAD_FIELDS.name) || 'Лид';
+      const mgr = l.fields['Менеджер'] || '';
+      const color = getManagerColor(mgr);
+      const stage = l.fields['Воронка'] || 'Лид';
+      const isCall = isCallEvent(l);
+      const icon = isCall ? '📞' : '👤';
+      
+      const isShort = ev.height <= 30;
+      const cardStyle = `top: ${ev.start}px; height: ${ev.height}px; left: ${ev.left}%; width: ${ev.width}%; --mgr-color: ${color}; padding: ${isShort ? '2px 6px' : '4px 8px'}; display: flex; ${isShort ? 'flex-direction: row; gap: 6px; align-items: center;' : 'flex-direction: column; gap: 2px;'}`;
+      const nameStyle = isShort ? 'font-size: 9px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;' : '';
+      
+      eventsHtml += `
+        <div class="weekly-event-card" style="${cardStyle}" onclick="event.stopPropagation(); openLeadDetail('${l.id}', '${escHtml(stage)}')" title="${escHtml(name)} (${time}) - ${escHtml(mgr)}">
+          <div class="weekly-event-card-time" style="${isShort ? 'margin:0; white-space:nowrap;' : ''}">${escHtml(time)}</div>
+          <div class="weekly-event-card-name" style="${nameStyle}">${icon} ${escHtml(name)}</div>
+          ${(!isShort && mgr) ? `<div class="weekly-event-card-mgr">👤 ${escHtml(mgr)}</div>` : ''}
+        </div>
+      `;
+    });
+
+    columnsHtml += `
+      <div class="weekly-day-column" data-date="${dIso}">
+        ${linesHtml}
+        ${timelineHtml}
+        ${eventsHtml}
+      </div>
+    `;
+  });
+
+  const html = `
+    <div class="weekly-calendar-container">
+      <div class="weekly-calendar-header" ${inlineGridStyle}>
+        <div class="weekly-header-spacer"></div>
+        <div class="weekly-header-days">
+          ${headerDaysHtml}
+        </div>
+      </div>
+      <div class="weekly-calendar-scroll-area" ${inlineScrollStyle}>
+        <div class="weekly-hours-column">
+          ${hoursHtml}
+        </div>
+        <div class="weekly-grid-body" ${inlineGridStyle}>
+          ${columnsHtml}
+        </div>
+      </div>
+    </div>
+  `;
+
+  container.innerHTML = html;
+
+  // Автоматический скролл до 10:00 утра (120px) при первой отрисовке
+  const scrollArea = container.querySelector('.weekly-calendar-scroll-area');
+  if (scrollArea && scrollArea.scrollTop === 0) {
+    setTimeout(() => {
+      scrollArea.scrollTop = 120;
+    }, 50);
   }
 }
 
@@ -4088,21 +5402,53 @@ function goMobileDay(dateStr) {
 }
 
 function prevMonth() {
-  if (CalState.currentMonth === 0) {
-    CalState.currentMonth = 11;
-    CalState.currentYear--;
+  if (CalState.view === 'day') {
+    const d = new Date(CalState.selectedDate);
+    d.setDate(d.getDate() - 1);
+    CalState.selectedDate = getLocalDateString(d);
+    CalState.currentYear = d.getFullYear();
+    CalState.currentMonth = d.getMonth();
+  } else if (CalState.view === 'week') {
+    const d = new Date(CalState.selectedDate);
+    d.setDate(d.getDate() - 7);
+    CalState.selectedDate = getLocalDateString(d);
+    CalState.currentYear = d.getFullYear();
+    CalState.currentMonth = d.getMonth();
   } else {
-    CalState.currentMonth--;
+    if (CalState.currentMonth === 0) {
+      CalState.currentMonth = 11;
+      CalState.currentYear--;
+    } else {
+      CalState.currentMonth--;
+    }
+    const firstDayStr = `${CalState.currentYear}-${String(CalState.currentMonth + 1).padStart(2, '0')}-01`;
+    CalState.selectedDate = firstDayStr;
   }
   renderCalendar();
 }
 
 function nextMonth() {
-  if (CalState.currentMonth === 11) {
-    CalState.currentMonth = 0;
-    CalState.currentYear++;
+  if (CalState.view === 'day') {
+    const d = new Date(CalState.selectedDate);
+    d.setDate(d.getDate() + 1);
+    CalState.selectedDate = getLocalDateString(d);
+    CalState.currentYear = d.getFullYear();
+    CalState.currentMonth = d.getMonth();
+  } else if (CalState.view === 'week') {
+    const d = new Date(CalState.selectedDate);
+    d.setDate(d.getDate() + 7);
+    CalState.selectedDate = getLocalDateString(d);
+    CalState.currentYear = d.getFullYear();
+    CalState.currentMonth = d.getMonth();
   } else {
-    CalState.currentMonth++;
+    if (CalState.currentMonth === 11) {
+      CalState.currentMonth = 0;
+      CalState.currentYear++;
+    } else {
+      CalState.currentMonth++;
+    }
+    const firstDayStr = `${CalState.currentYear}-${String(CalState.currentMonth + 1).padStart(2, '0')}-01`;
+    CalState.selectedDate = firstDayStr;
   }
   renderCalendar();
 }
@@ -4111,7 +5457,7 @@ function goToday() {
   const today = new Date();
   CalState.currentYear = today.getFullYear();
   CalState.currentMonth = today.getMonth();
-  CalState.selectedDate = today.toISOString().substring(0, 10);
+  CalState.selectedDate = getLocalDateString(today);
   renderCalendar();
 }
 

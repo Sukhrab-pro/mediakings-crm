@@ -14,6 +14,11 @@ const State = {
   filterDateType: '', // 'assign' | 'consult' | ''
   filterDate: '',     // 'YYYY-MM-DD' | ''
 
+  // Фильтры показателей (статистики)
+  statsPeriod: 'this_week', // 'today' | 'this_week' | 'last_week' | 'month' | 'custom'
+  statsCustomFrom: '',      // 'YYYY-MM-DD'
+  statsCustomTo: '',        // 'YYYY-MM-DD'
+
   // Финансы
   financeIncomes: [],
   financeExpenses: [],
@@ -147,14 +152,22 @@ function setColumnSort(stageKey, sortType) {
 // ─── Sidebar toggle
 function toggleSidebar() {
   const sidebar = document.getElementById('main-sidebar');
+  const layout  = document.querySelector('.app-layout');
   if (!sidebar) return;
-  sidebar.classList.toggle('collapsed');
-  localStorage.setItem('sidebar_collapsed', sidebar.classList.contains('collapsed') ? '1' : '0');
+  const isCollapsed = sidebar.classList.toggle('collapsed');
+  if (layout) layout.classList.toggle('sidebar-collapsed', isCollapsed);
+  document.documentElement.setAttribute('data-sb', isCollapsed ? 'collapsed' : 'expanded');
+  localStorage.setItem('sidebar_collapsed', isCollapsed ? '1' : '0');
 }
 function initSidebar() {
   const sidebar = document.getElementById('main-sidebar');
+  const layout  = document.querySelector('.app-layout');
   if (!sidebar) return;
-  if (localStorage.getItem('sidebar_collapsed') === '1') sidebar.classList.add('collapsed');
+  // Collapsed по умолчанию, expanded только если явно '0'
+  const collapsed = localStorage.getItem('sidebar_collapsed') !== '0';
+  sidebar.classList.toggle('collapsed', collapsed);
+  if (layout) layout.classList.toggle('sidebar-collapsed', collapsed);
+  document.documentElement.setAttribute('data-sb', collapsed ? 'collapsed' : 'expanded');
 }
 
 // ─── Router
@@ -184,8 +197,8 @@ async function loadPage(page) {
   if (page === 'employees')  await loadAdminEmployees();
   if (page === 'tariffs')    await loadAdminTariffs();
   if (page === 'services')   await loadAdminServices();
-  if (page === 'calculator') await loadAdminCalculator();
   if (page === 'partners')   await loadAdminPartners();
+  if (page === 'tariff-constructor') await loadTariffConstructor();
 }
 
 // ─── Toast / Loading
@@ -209,7 +222,7 @@ const _MOBILE_PAGE_TITLES = {
   leads: '🎯 Лиды', clients: '👥 Клиенты', deals: '📁 Проекты',
   operations: '📋 Операции', finance: '💰 Финансы', calendar: '📅 Календарь',
   analytics: '📊 Отчёты', employees: '👤 Сотрудники', tariffs: '🏷️ Тарифы',
-  services: '💲 Цены на услуги', calculator: '🧮 Калькулятор', partners: '🤝 Партнеры'
+  services: '💲 Цены на услуги', partners: '🤝 Партнеры'
 };
 
 function updateMobileBar() {
@@ -501,7 +514,7 @@ function updateTasksReminderNotification() {
   activeLeads.forEach(l => {
     const tasks = safeJsonParse(l.fields['Задачи'] || '[]');
     const myActiveDueTasks = tasks.filter(t => {
-      if (t.done) return false;
+      if (t.done || t.cancelled) return false;
       if (t.user && t.user.trim().toLowerCase() !== cleanCurrentUser) return false;
       if (!t.dueDate) return false;
       return t.dueDate <= todayStr;
@@ -573,7 +586,7 @@ function openTasksReminder() {
   activeLeads.forEach(l => {
     const tasks = safeJsonParse(l.fields['Задачи'] || '[]');
     const myActiveDueTasks = tasks.filter(t => {
-      if (t.done) return false;
+      if (t.done || t.cancelled) return false;
       if (t.user && t.user.trim().toLowerCase() !== cleanCurrentUser) return false;
       if (!t.dueDate) return false;
       return t.dueDate <= todayStr;

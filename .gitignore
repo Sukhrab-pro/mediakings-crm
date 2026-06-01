@@ -7,3 +7,7 @@ google-credentials.json
 # macOS
 .DS_Store
 Thumbs.db
+
+# Local Scratch & Claude configs
+scratch/
+.claude/

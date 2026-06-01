@@ -48,6 +48,13 @@
   <button class="mobile-topbar-action" onclick="openPipelineSettings()" title="Настройка">⚙️</button>
 </div>
 
+<script>
+// Collapsed по умолчанию, expanded только если явно сохранено
+if(localStorage.getItem('sidebar_collapsed')!=='0'){
+  document.documentElement.setAttribute('data-sb','collapsed');
+}
+</script>
+
 <div class="app-layout">
 
 <!-- ─── LEFT SIDEBAR ─── -->
@@ -73,8 +80,8 @@
     <button class="nav-item" data-page="employees" onclick="navigate('employees')"><span class="nav-icon">👤</span><span class="nav-label">Сотрудники</span></button>
     <button class="nav-item" data-page="tariffs" onclick="navigate('tariffs')"><span class="nav-icon">🏷️</span><span class="nav-label">Тарифы</span></button>
     <button class="nav-item" data-page="services" onclick="navigate('services')"><span class="nav-icon">💲</span><span class="nav-label">Цены на услуги</span></button>
-    <button class="nav-item" data-page="calculator" onclick="navigate('calculator')"><span class="nav-icon">🧮</span><span class="nav-label">Калькулятор</span></button>
     <button class="nav-item" data-page="partners" onclick="navigate('partners')"><span class="nav-icon">🤝</span><span class="nav-label">Партнеры</span></button>
+    <button class="nav-item" data-page="tariff-constructor" onclick="navigate('tariff-constructor')"><span class="nav-icon">🏗️</span><span class="nav-label">Конструктор тарифов</span></button>
   </div>
 </nav>
 
@@ -82,10 +89,8 @@
 <div class="main-wrap">
 
 <div class="header" style="justify-content:space-between; width:100%; box-sizing:border-box;">
-  <div style="display:flex; align-items:center; gap:14px;">
-    <div class="header-logo">👑</div>
-    <div><h1>MediaKings</h1><div class="header-sub">CRM система</div></div>
-    <button class="header-btn" onclick="openPipelineSettings()" title="Настройка воронок" style="margin-left:8px; gap:4px; font-size:12px; padding:6px 12px;">
+  <div style="display:flex; align-items:center; gap:10px;">
+    <button class="header-btn" onclick="openPipelineSettings()" title="Настройка воронок" style="gap:4px; font-size:12px; padding:6px 12px;">
       ⚙️ Настройка
     </button>
   </div>
@@ -168,6 +173,8 @@
     <div style="font-size:18px; font-weight:800;">💰 Финансы</div>
     <div style="display:flex; gap:8px;">
       <button id="btn-add-operation" class="btn btn-primary btn-compact" onclick="openAddOperationMenu()" style="margin:0; background:linear-gradient(135deg,#10b981,#059669); height:36px; display:inline-flex; align-items:center; gap:6px; font-size:13px; font-weight:700; border:none; color:#fff !important; width:auto !important; padding:0 16px;">➕ Добавить операцию</button>
+      <button id="btn-sync-finance" class="btn btn-compact" onclick="document.getElementById('finance-xlsx-input').click()" style="margin:0; height:36px; display:inline-flex; align-items:center; gap:6px; font-size:13px; font-weight:700; padding:0 16px; background:rgba(99,102,241,0.15); border:1px solid rgba(99,102,241,0.3); color:#a5b4fc;">📥 Импорт из Excel</button>
+      <input type="file" id="finance-xlsx-input" accept=".xlsx" style="display:none;" onchange="syncFinanceFromExcel(event)"/>
     </div>
   </div>
 
@@ -180,6 +187,8 @@
       <input type="date" id="fin-date-end" class="form-input" style="height:32px !important; font-size:12px; padding:4px 8px; width:130px; border-radius:8px; background:var(--surface); border:1px solid rgba(255,255,255,0.1); margin:0;" onchange="onFinanceDateRangeChange()" />
     </div>
     <button class="btn-period-reset" onclick="resetFinancePeriodToCurrentMonth()">Этот месяц</button>
+    <button class="btn-period-reset" onclick="resetFinancePeriodToLastMonth()">Прошлый месяц</button>
+    <button class="btn-period-reset" onclick="resetFinancePeriodToCurrentYear()">Этот год</button>
     <button class="btn-period-reset" onclick="resetFinancePeriodToAllTime()">Все время</button>
   </div>
 
@@ -217,7 +226,10 @@
   <!-- Accounts list -->
   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
     <div style="font-size:11px; font-weight:800; color:var(--text2); text-transform:uppercase; letter-spacing:0.05em;">Счета и кошельки</div>
-    <button class="btn btn-secondary btn-compact" onclick="openDrawer('drawer-manage-accounts'); renderManageAccountsList();" style="height:24px; font-size:10px; padding:0 8px; margin:0; border-radius:6px; width:auto !important; display:inline-flex !important; align-items:center; justify-content:center; background:rgba(255,255,255,0.05); color:var(--text); border:none; cursor:pointer;">⚙️ Управление</button>
+    <div style="display:flex; gap:6px;">
+      <button onclick="openDrawer('drawer-manage-accounts'); renderManageAccountsList();" style="height:24px; font-size:10px; padding:0 10px; border-radius:6px; display:inline-flex; align-items:center; gap:4px; background:rgba(255,255,255,0.05); color:var(--text); border:1px solid rgba(255,255,255,0.08); cursor:pointer; font-weight:600;">💳 Счета</button>
+      <button onclick="openManageCategoriesDrawer();" style="height:24px; font-size:10px; padding:0 10px; border-radius:6px; display:inline-flex; align-items:center; gap:4px; background:rgba(255,255,255,0.05); color:var(--text); border:1px solid rgba(255,255,255,0.08); cursor:pointer; font-weight:600;">🏷️ Категории</button>
+    </div>
   </div>
   <div id="finance-accounts-list" style="display:flex; gap:8px; overflow-x:auto; padding-bottom:8px; margin-bottom:16px;">
     <!-- Active accounts dynamic list -->
@@ -277,6 +289,11 @@
       <div id="calendar-title" style="font-size:18px; font-weight:800; margin-left:8px; min-width:140px; color:#fff;"></div>
     </div>
     <div style="display:flex; align-items:center; gap:8px;">
+      <div class="calendar-view-toggle-group" style="display:flex; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:10px; padding:3px; gap:4px; margin-right:8px; height:36px; box-sizing:border-box; align-items:center;">
+        <button id="btn-cal-view-month" class="btn btn-compact" style="margin:0; height:28px; font-size:12px; font-weight:700; padding:0 12px; border-radius:7px; border:none; background:#3b82f6; color:#fff;" onclick="setCalendarView('month')">Месяц</button>
+        <button id="btn-cal-view-week" class="btn btn-compact" style="margin:0; height:28px; font-size:12px; font-weight:700; padding:0 12px; border-radius:7px; border:none; background:transparent; color:var(--text2);" onclick="setCalendarView('week')">Неделя</button>
+        <button id="btn-cal-view-day" class="btn btn-compact" style="margin:0; height:28px; font-size:12px; font-weight:700; padding:0 12px; border-radius:7px; border:none; background:transparent; color:var(--text2);" onclick="setCalendarView('day')">День</button>
+      </div>
       <select id="cal-flt-manager" onchange="onCalendarFilterChange()" class="form-select compact-input" style="width:160px; height:36px !important; margin:0; padding: 4px 28px 4px 10px !important;">
         <option value="">Все менеджеры</option>
       </select>
@@ -299,11 +316,13 @@
 <div id="page-services" class="page admin-page">
   <div id="services-content"><div class="loading-state"><div class="spinner"></div></div></div>
 </div>
-<div id="page-calculator" class="page admin-page">
-  <div id="calculator-content"><div class="loading-state"><div class="spinner"></div></div></div>
-</div>
+
 <div id="page-partners" class="page admin-page">
   <div id="partners-content"><div class="loading-state"><div class="spinner"></div></div></div>
+</div>
+
+<div id="page-tariff-constructor" class="page admin-page">
+  <div id="tariff-constructor-content"><div class="loading-state"><div class="spinner"></div></div></div>
 </div>
 
 <button class="fab" onclick="fabAction()">+</button>
@@ -351,32 +370,36 @@
     <div class="drawer-title">🎯 Новый лид</div>
     <div class="card">
       <div class="form-group"><label class="form-label">Имя *</label>
-        <input id="l-name" class="form-input" type="text" placeholder="Иван Иванов"/></div>
+        <input id="l-name" class="form-input compact-input" type="text" placeholder="Иван Иванов"/></div>
       <div class="form-group"><label class="form-label">Телефон</label>
-        <input id="l-phone" class="form-input" type="tel" placeholder="+7 900 000 00 00"/></div>
+        <input id="l-phone" class="form-input compact-input" type="tel" placeholder="+7 900 000 00 00"/></div>
       <div class="form-group"><label class="form-label">Instagram</label>
-        <input id="l-instagram" class="form-input" type="text" placeholder="@handle или ссылка"/></div>
+        <input id="l-instagram" class="form-input compact-input" type="text" placeholder="@handle или ссылка"/></div>
       <div class="form-group"><label class="form-label">Источник</label>
-        <input id="l-source" class="form-input" type="text" placeholder="Instagram, ВКонтакте, сарафан..."/></div>
+        <input id="l-source" class="form-input compact-input" type="text" placeholder="Instagram, ВКонтакте, сарафан..."/></div>
+      <div class="form-group"><label class="form-label">Ниша</label>
+        <input id="l-niche" class="form-input compact-input" type="text" placeholder="Инфобизнес, бьюти, товарка..."/></div>
       <div class="form-group"><label class="form-label">Бюджет (₸)</label>
-        <input id="l-budget" class="form-input" type="number" placeholder="0"/></div>
+        <input id="l-budget" class="form-input compact-input" type="number" placeholder="0"/></div>
       <div class="form-group"><label class="form-label">Менеджер</label>
-        <select id="l-manager" class="form-select">
+        <select id="l-manager" class="form-select compact-input">
           <option value="">— не назначен —</option>
         </select></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div class="form-group" style="margin:0"><label class="form-label">📅 Дата конс.</label>
-          <input id="l-consult-date" class="form-input" type="date" onclick="try{this.showPicker()}catch(e){}"/></div>
+          <input id="l-consult-date" class="form-input compact-input" type="date" onclick="try{this.showPicker()}catch(e){}"/></div>
         <div class="form-group" style="margin:0"><label class="form-label">🕒 Время конс.</label>
-          <input id="l-consult-time" class="form-input" type="time" onclick="try{this.showPicker()}catch(e){}"/></div>
+          <input id="l-consult-time" class="form-input compact-input" type="time" onclick="try{this.showPicker()}catch(e){}"/></div>
       </div>
       <div class="form-group"><label class="form-label">Этап</label>
-        <select id="l-stage" class="form-select"></select></div>
+        <select id="l-stage" class="form-select compact-input"></select></div>
       <div class="form-group"><label class="form-label">Комментарий</label>
-        <textarea id="l-comment" class="form-input form-textarea" placeholder="Заметки о лиде..."></textarea></div>
+        <textarea id="l-comment" class="form-input compact-input form-textarea" placeholder="Заметки о лиде..."></textarea></div>
     </div>
-    <button id="save-lead-btn" class="btn btn-primary" onclick="saveLead()">💾 Сохранить лид</button>
-    <button class="btn btn-secondary" onclick="closeDrawer('drawer-lead')">Отмена</button>
+    <div style="display:flex; gap:8px; margin-top:16px; justify-content: flex-end;">
+      <button id="save-lead-btn" class="btn btn-primary btn-save-compact" style="width: auto; height: 36px; padding: 0 16px; margin: 0;" onclick="saveLead()">💾 Сохранить лид</button>
+      <button class="btn btn-secondary btn-compact" style="width: auto; height: 36px; margin: 0; padding: 0 16px; display: inline-flex; align-items: center; justify-content: center;" onclick="closeDrawer('drawer-lead')">Отмена</button>
+    </div>
   </div>
 </div>
 
@@ -400,10 +423,12 @@
     </div>
     <div class="form-group" style="margin-top:12px">
       <label class="form-label">Комментарий (необязательно)</label>
-      <input id="reject-comment" class="form-input" type="text" placeholder="Уточните..."/>
+      <input id="reject-comment" class="form-input compact-input" type="text" placeholder="Уточните..."/>
     </div>
-    <button id="confirm-reject-btn" class="btn btn-secondary" onclick="confirmReject()" style="background:rgba(100,116,139,0.15);color:#94a3b8;border:1px solid rgba(100,116,139,0.35)">🚫 Отметить не целевым</button>
-    <button class="btn btn-secondary" onclick="cancelReject()">Отмена</button>
+    <div style="display:flex; gap:8px; margin-top:16px; justify-content: flex-end;">
+      <button id="confirm-reject-btn" class="btn btn-secondary btn-compact" onclick="confirmReject()" style="width: auto; height: 36px; margin: 0; padding: 0 16px; background:rgba(239,68,68,0.15); color:var(--danger); border:1px solid rgba(239,68,68,0.25); display: inline-flex; align-items: center; justify-content: center;">🚫 Не целевой</button>
+      <button class="btn btn-secondary btn-compact" style="width: auto; height: 36px; margin: 0; padding: 0 16px; display: inline-flex; align-items: center; justify-content: center;" onclick="cancelReject()">Отмена</button>
+    </div>
   </div>
 </div>
 
@@ -417,16 +442,25 @@
     <div class="form-group">
       <label class="form-label">Когда связаться? *</label>
       <div style="display:flex; gap:8px;">
-        <input id="contact-later-date" class="form-input" type="date" style="flex:1;" onclick="try{this.showPicker()}catch(e){}"/>
-        <input id="contact-later-time" class="form-input" type="time" style="width:110px;" onclick="try{this.showPicker()}catch(e){}"/>
+        <input id="contact-later-date" class="form-input compact-input" type="date" style="flex:1;" onclick="try{this.showPicker()}catch(e){}"/>
+        <input id="contact-later-time" class="form-input compact-input" type="time" style="width:110px;" onclick="try{this.showPicker()}catch(e){}"/>
       </div>
     </div>
     <div class="form-group" style="margin-top:12px">
-      <label class="form-label">Что нужно сделать? / Комментарий *</label>
-      <input id="contact-later-text" class="form-input" type="text" placeholder="Например: Позвонить и узнать решение по КП"/>
+      <label class="form-label">Тип задачи</label>
+      <select id="contact-later-type" class="form-select compact-input">
+        <option value="task">📝 Задача</option>
+        <option value="call">📞 Звонок</option>
+      </select>
     </div>
-    <button id="confirm-contact-later-btn" class="btn btn-primary" onclick="confirmContactLater()" style="margin-top:16px;">📅 Запланировать и перенести</button>
-    <button class="btn btn-secondary" onclick="cancelContactLater()">Отмена</button>
+    <div class="form-group" style="margin-top:12px">
+      <label class="form-label">Что нужно сделать? / Комментарий *</label>
+      <input id="contact-later-text" class="form-input compact-input" type="text" placeholder="Например: Позвонить и узнать решение по КП"/>
+    </div>
+    <div style="display:flex; gap:8px; margin-top:16px; justify-content: flex-end;">
+      <button id="confirm-contact-later-btn" class="btn btn-primary btn-save-compact" style="width: auto; height: 36px; padding: 0 16px; margin: 0;" onclick="confirmContactLater()">📅 Запланировать</button>
+      <button class="btn btn-secondary btn-compact" style="width: auto; height: 36px; margin: 0; padding: 0 16px; display: inline-flex; align-items: center; justify-content: center;" onclick="cancelContactLater()">Отмена</button>
+    </div>
   </div>
 </div>
 
@@ -436,16 +470,18 @@
     <button class="drawer-close-btn" onclick="closeDrawer('drawer-client')">&times;</button>
     <div class="drawer-handle"></div>
     <div class="drawer-title">Новый клиент</div>
-    <div class="form-group"><label class="form-label">Имя *</label><input id="c-name" class="form-input" type="text"/></div>
-    <div class="form-group"><label class="form-label">Компания</label><input id="c-company" class="form-input" type="text" placeholder="Название компании"/></div>
-    <div class="form-group"><label class="form-label">Ниша</label><input id="c-niche" class="form-input" type="text"/></div>
-    <div class="form-group"><label class="form-label">Телефон</label><input id="c-phone" class="form-input" type="tel"/></div>
-    <div class="form-group"><label class="form-label">Email</label><input id="c-email" class="form-input" type="email"/></div>
+    <div class="form-group"><label class="form-label">Имя *</label><input id="c-name" class="form-input compact-input" type="text"/></div>
+    <div class="form-group"><label class="form-label">Компания</label><input id="c-company" class="form-input compact-input" type="text" placeholder="Название компании"/></div>
+    <div class="form-group"><label class="form-label">Ниша</label><input id="c-niche" class="form-input compact-input" type="text"/></div>
+    <div class="form-group"><label class="form-label">Телефон</label><input id="c-phone" class="form-input compact-input" type="tel"/></div>
+    <div class="form-group"><label class="form-label">Email</label><input id="c-email" class="form-input compact-input" type="email"/></div>
     <div class="form-group"><label class="form-label">Статус</label>
-      <select id="c-status" class="form-select"><option>Активный</option><option>Неактивный</option></select>
+      <select id="c-status" class="form-select compact-input"><option>Активный</option><option>Неактивный</option></select>
     </div>
-    <button id="save-client-btn" class="btn btn-primary" onclick="saveClient()">Сохранить</button>
-    <button class="btn btn-secondary" onclick="closeDrawer('drawer-client')">Отмена</button>
+    <div style="display:flex; gap:8px; margin-top:16px; justify-content: flex-end;">
+      <button id="save-client-btn" class="btn btn-primary btn-save-compact" style="width: auto; height: 36px; padding: 0 16px; margin: 0;" onclick="saveClient()">Сохранить</button>
+      <button class="btn btn-secondary btn-compact" style="width: auto; height: 36px; margin: 0; padding: 0 16px; display: inline-flex; align-items: center; justify-content: center;" onclick="closeDrawer('drawer-client')">Отмена</button>
+    </div>
   </div>
 </div>
 
@@ -457,13 +493,13 @@
     <div class="drawer-title">📁 Новый проект</div>
 
     <div class="form-group"><label class="form-label">Название проекта *</label>
-      <input id="d-name" class="form-input" type="text" placeholder="SMM для @brand"/></div>
+      <input id="d-name" class="form-input compact-input" type="text" placeholder="SMM для @brand"/></div>
 
     <div class="form-group"><label class="form-label">Клиент</label>
-      <select id="d-client" class="form-select"><option value="">Выберите клиента</option></select></div>
+      <select id="d-client" class="form-select compact-input"><option value="">Выберите клиента</option></select></div>
 
     <div class="form-group"><label class="form-label">Статус работы</label>
-      <select id="d-status" class="form-select">
+      <select id="d-status" class="form-select compact-input">
         <option value="В работе">В работе</option>
         <option value="На паузе">На паузе</option>
         <option value="Готово">Готово</option>
@@ -471,23 +507,25 @@
       </select></div>
 
     <div class="form-group"><label class="form-label">Тариф</label>
-      <select id="d-tariff" class="form-select" onchange="onDealTariffChange(this.value)"><option value="">Выберите тариф</option></select></div>
+      <select id="d-tariff" class="form-select compact-input" onchange="onDealTariffChange(this.value)"><option value="">Выберите тариф</option></select></div>
 
     <div class="form-group"><label class="form-label">Проджект-менеджер</label>
-      <select id="d-project" class="form-select"><option value="">Выберите проджект-менеджера</option></select></div>
+      <select id="d-project" class="form-select compact-input"><option value="">Выберите проджект-менеджера</option></select></div>
 
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
       <div class="form-group" style="margin:0;"><label class="form-label">💰 Стоимость (₸)</label>
-        <input id="d-amount" class="form-input" type="number" placeholder="0"/></div>
+        <input id="d-amount" class="form-input compact-input" type="number" placeholder="0"/></div>
       <div class="form-group" style="margin:0;"><label class="form-label">📅 Дата начала</label>
-        <input id="d-date-start" class="form-input" type="date" onclick="try{this.showPicker()}catch(e){}"/></div>
+        <input id="d-date-start" class="form-input compact-input" type="date" onclick="try{this.showPicker()}catch(e){}"/></div>
     </div>
 
     <div class="form-group" style="margin-top:10px;"><label class="form-label">Комментарий</label>
-      <textarea id="d-comment" class="form-input form-textarea" placeholder="Заметки о проекте..."></textarea></div>
+      <textarea id="d-comment" class="form-input compact-input form-textarea" placeholder="Заметки о проекте..."></textarea></div>
 
-    <button id="save-deal-btn" class="btn btn-primary" onclick="saveDeal()">💾 Сохранить проект</button>
-    <button class="btn btn-secondary" onclick="closeDrawer('drawer-deal')">Отмена</button>
+    <div style="display:flex; gap:8px; margin-top:16px; justify-content: flex-end;">
+      <button id="save-deal-btn" class="btn btn-primary btn-save-compact" style="width: auto; height: 36px; padding: 0 16px; margin: 0;" onclick="saveDeal()">💾 Сохранить проект</button>
+      <button class="btn btn-secondary" style="width: auto; height: 36px; margin: 0; padding: 0 16px; display: inline-flex; align-items: center; justify-content: center;" onclick="closeDrawer('drawer-deal')">Отмена</button>
+    </div>
   </div>
 </div>
 
@@ -498,17 +536,19 @@
     <div class="drawer-handle"></div>
     <div class="drawer-title">Новая операция</div>
     <div class="form-group"><label class="form-label">Тип *</label>
-      <select id="op-type" class="form-select"><option value="">Выберите тип</option><option>Съёмка</option><option>Монтаж</option><option>Сценарий</option><option>Сторис</option><option>Воронка</option><option>Тредс</option><option>Чат посты</option></select>
+      <select id="op-type" class="form-select compact-input"><option value="">Выберите тип</option><option>Съёмка</option><option>Монтаж</option><option>Сценарий</option><option>Сторис</option><option>Воронка</option><option>Тредс</option><option>Чат посты</option></select>
     </div>
-    <div class="form-group"><label class="form-label">Проект</label><select id="op-deal" class="form-select"><option value="">Загрузка...</option></select></div>
-    <div class="form-group"><label class="form-label">Исполнитель</label><select id="op-employee" class="form-select"><option value="">Загрузка...</option></select></div>
-    <div class="form-group"><label class="form-label">Кол-во</label><input id="op-qty" class="form-input" type="number" placeholder="0"/></div>
-    <div class="form-group"><label class="form-label">Часов</label><input id="op-hours" class="form-input" type="number" placeholder="0"/></div>
+    <div class="form-group"><label class="form-label">Проект</label><select id="op-deal" class="form-select compact-input"><option value="">Загрузка...</option></select></div>
+    <div class="form-group"><label class="form-label">Исполнитель</label><select id="op-employee" class="form-select compact-input"><option value="">Загрузка...</option></select></div>
+    <div class="form-group"><label class="form-label">Кол-во</label><input id="op-qty" class="form-input compact-input" type="number" placeholder="0"/></div>
+    <div class="form-group"><label class="form-label">Часов</label><input id="op-hours" class="form-input compact-input" type="number" placeholder="0"/></div>
     <div class="form-group"><label class="form-label">Статус оплаты</label>
-      <select id="op-pay" class="form-select"><option>Не оплачено</option><option>Оплачено</option><option>Частично</option></select>
+      <select id="op-pay" class="form-select compact-input"><option>Не оплачено</option><option>Оплачено</option><option>Частично</option></select>
     </div>
-    <button id="save-op-btn" class="btn btn-primary" onclick="saveOperation()">Сохранить</button>
-    <button class="btn btn-secondary" onclick="closeDrawer('drawer-operation')">Отмена</button>
+    <div style="display:flex; gap:8px; margin-top:16px; justify-content: flex-end;">
+      <button id="save-op-btn" class="btn btn-primary btn-save-compact" style="width: auto; height: 36px; padding: 0 16px; margin: 0;" onclick="saveOperation()">Сохранить</button>
+      <button class="btn btn-secondary" style="width: auto; height: 36px; margin: 0; padding: 0 16px; display: inline-flex; align-items: center; justify-content: center;" onclick="closeDrawer('drawer-operation')">Отмена</button>
+    </div>
   </div>
 </div>
 
@@ -601,7 +641,7 @@
   <div class="drawer" style="max-height:90vh; overflow-y:auto; width:450px;">
     <button class="drawer-close-btn" onclick="closeDrawer('drawer-manage-accounts')">&times;</button>
     <div class="drawer-handle"></div>
-    <div class="drawer-title">⚙️ Управление счетами</div>
+    <div class="drawer-title">💳 Счета и кошельки</div>
     
     <!-- Accounts list -->
     <div style="font-weight:700; font-size:13px; color:var(--text2); margin-bottom:8px;">Список счетов</div>
@@ -636,6 +676,35 @@
     
     <button id="add-acc-btn" class="btn btn-primary" onclick="addNewAccount()" style="width:100%; margin-bottom:8px; background:linear-gradient(135deg,#10b981,#059669); color:#fff !important;">Добавить счет</button>
     <button class="btn btn-secondary" onclick="closeDrawer('drawer-manage-accounts')" style="width:100%; margin:0;">Закрыть</button>
+  </div>
+</div>
+
+<!-- Manage Categories Drawer -->
+<div id="drawer-manage-categories" class="overlay">
+  <div class="drawer" style="max-height:90vh; overflow-y:auto; width:480px;">
+    <button class="drawer-close-btn" onclick="closeDrawer('drawer-manage-categories')">&times;</button>
+    <div class="drawer-handle"></div>
+    <div class="drawer-title">🏷️ Категории транзакций</div>
+    <div id="manage-categories-list" style="margin-bottom:20px;"></div>
+    <hr style="border:none; border-top:1px solid rgba(255,255,255,0.08); margin-bottom:16px;"/>
+    <div style="font-weight:700; font-size:13px; color:var(--text2); margin-bottom:12px;">➕ Добавить категорию</div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px;">
+      <div class="form-group" style="margin:0;">
+        <label class="form-label">Название *</label>
+        <input id="new-cat-name" class="form-input" type="text" placeholder="Напр. Аренда офиса"/>
+      </div>
+      <div class="form-group" style="margin:0;">
+        <label class="form-label">Тип *</label>
+        <select id="new-cat-type" class="form-select">
+          <option value="Доходы">💰 Доходы</option>
+          <option value="Приходы">📥 Приходы</option>
+          <option value="Расходы" selected>💸 Расходы</option>
+          <option value="Затраты">📉 Затраты</option>
+        </select>
+      </div>
+    </div>
+    <button id="add-cat-btn" class="btn btn-primary" onclick="addNewCategory()" style="width:100%; margin-bottom:8px; background:linear-gradient(135deg,#6366f1,#8b5cf6); color:#fff !important;">Добавить категорию</button>
+    <button class="btn btn-secondary" onclick="closeDrawer('drawer-manage-categories')" style="width:100%; margin:0;">Закрыть</button>
   </div>
 </div>
 

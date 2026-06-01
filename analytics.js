@@ -996,7 +996,7 @@ function renderTabMarketing() {
           </div>
           <!-- Продажи -->
           <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-            <div style="width:140px; font-size:13px; color:var(--text2); font-weight:600;">Продажи (сделки)</div>
+            <div style="width:140px; font-size:13px; color:var(--text2); font-weight:600;">Продажи (проекты)</div>
             <div style="flex:1; min-width:200px; height:24px; background:rgba(255,255,255,0.03); border-radius:12px; overflow:hidden; position:relative; border:1px solid rgba(255,255,255,0.05);">
               <div style="width:${parseFloat(CR_Sale) > 0 ? Math.min(100, parseFloat(CR_Sale) * 5) : 0}%; height:100%; background:linear-gradient(90deg, #10b981, #059669); border-radius:12px; min-width:4px;"></div>
               <span style="position:absolute; left:12px; top:50%; transform:translateY(-50%); font-size:12px; font-weight:800; color:#fff;">${totalSales}</span>
