@@ -2351,6 +2351,9 @@ function renderLeadMiddleColumn(lead) {
             const task = tasks.find(t => t.id === taskId);
             if (task && !renderedTaskIds.has(task.id)) {
               renderedTaskIds.add(task.id);
+              if (State.editingTaskId === task.id) {
+                return renderInlineTaskEditForm(id, task);
+              }
               const timeStr = task.dueTime ? ` в ${task.dueTime}` : '';
               return `
                 <div class="timeline-task-card" style="background:${bg}; border:${border}; border-radius:12px; padding:12px; margin-bottom:4px; display:flex; gap:10px; align-items:flex-start; box-shadow: 0 2px 6px rgba(0,0,0,0.1); align-self: stretch; position:relative;">
@@ -2936,12 +2939,68 @@ function renderInlineTaskEditForm(leadId, task) {
         <input type="time" id="ei-edit-task-time-${task.id}" class="form-input compact-input" value="${task.dueTime || '12:00'}" onclick="try{this.showPicker()}catch(e){}" style="width:80px; height:28px !important; font-size:12px !important; padding:2px 6px !important;">
         <input type="number" id="ei-edit-task-duration-${task.id}" class="form-input compact-input" value="${task.duration || 30}" style="width:55px; height:28px !important; font-size:12px !important; padding:2px 6px !important;" title="Длительность (мин)" placeholder="мин">
       </div>
-      <div style="display:flex; justify-content:flex-end; gap:6px; margin-top:4px;">
-        <button class="btn btn-secondary btn-compact" onclick="cancelEditTask()" style="padding:4px 10px !important; font-size:11px !important; height:24px !important; margin:0; line-height:1;">Отмена</button>
-        <button class="btn btn-save-compact" onclick="saveEditTask('${leadId}', '${task.id}')" style="padding:4px 10px !important; font-size:11px !important; height:24px !important; margin:0; line-height:1; background:var(--primary); color:#fff; border:none;">Сохранить</button>
+      <div style="display:flex; justify-content:space-between; gap:6px; margin-top:4px; align-items:center; width:100%;">
+        <button class="btn btn-danger btn-compact" onclick="deleteLeadTask('${leadId}', '${task.id}')" style="padding:4px 10px !important; font-size:11px !important; height:24px !important; margin:0; line-height:1; background:#ef4444; color:#fff; border:none; border-radius:4px; cursor:pointer;">Удалить</button>
+        <div style="display:flex; gap:6px;">
+          <button class="btn btn-secondary btn-compact" onclick="cancelEditTask()" style="padding:4px 10px !important; font-size:11px !important; height:24px !important; margin:0; line-height:1; border-radius:4px; cursor:pointer;">Отмена</button>
+          <button class="btn btn-save-compact" onclick="saveEditTask('${leadId}', '${task.id}')" style="padding:4px 10px !important; font-size:11px !important; height:24px !important; margin:0; line-height:1; background:var(--primary); color:#fff; border:none; border-radius:4px; cursor:pointer;">Сохранить</button>
+        </div>
       </div>
     </div>
   `;
+}
+
+async function deleteLeadTask(leadId, taskId) {
+  if (!confirm('Вы уверены, что хотите навсегда удалить эту задачу?')) return;
+
+  const lead = State.leads.find(l => l.id === leadId);
+  if (!lead) return;
+
+  const tasks = safeJsonParse(lead.fields['Задачи'] || '[]');
+  const task = tasks.find(t => t.id === taskId);
+  if (!task) return;
+
+  const currentUser = localStorage.getItem('crm_current_user') || 'Система';
+  const dateStr = new Date().toLocaleString('ru-RU');
+
+  const updatedTasks = tasks.filter(t => t.id !== taskId);
+
+  const history = safeJsonParse(lead.fields['История'] || '[]');
+  history.unshift({
+    date: dateStr,
+    user: currentUser,
+    type: 'task_delete',
+    details: `Удалена задача: "${task.text}"`
+  });
+
+  const updates = {
+    'Задачи': JSON.stringify(updatedTasks),
+    'История': JSON.stringify(history)
+  };
+  
+  const synced = getSyncedConsultationFields(updatedTasks);
+  Object.assign(updates, synced);
+
+  try {
+    await Airtable.update(CONFIG.TABLES.LEADS, leadId, updates);
+    Object.assign(lead.fields, updates);
+    
+    State.editingTaskId = null;
+    
+    renderLeadMiddleColumn(lead);
+    renderKanban(State.leads);
+    
+    if (typeof renderCalendar === 'function') {
+      renderCalendar();
+    }
+    
+    toast('Задача удалена ✓');
+    if (typeof syncGoogleCalendarEvent === 'function') {
+      syncGoogleCalendarEvent(lead).catch(console.error);
+    }
+  } catch (e) {
+    toast('Ошибка удаления задачи: ' + e.message, 'error');
+  }
 }
 
 function startEditTask(taskId) {
@@ -3055,6 +3114,7 @@ window.onNewTaskTypeChange = onNewTaskTypeChange;
 window.startEditTask = startEditTask;
 window.cancelEditTask = cancelEditTask;
 window.saveEditTask = saveEditTask;
+window.deleteLeadTask = deleteLeadTask;
 
 // ─── Синхронизация с Google Календарем
 async function syncGoogleCalendarEvent(lead) {
