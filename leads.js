@@ -2268,7 +2268,10 @@ function renderLeadMiddleColumn(lead) {
             <div class="timeline-comment-bubble" style="display:flex; flex-direction:column; padding:10px 14px; border-radius:16px; border:1px solid rgba(255,255,255,0.06); margin-bottom:4px; max-width:100%; box-shadow: 0 2px 6px rgba(0,0,0,0.1); ${alignStyle}">
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; gap:8px;">
                 <span style="font-weight:700; font-size:11px; color:#a5b4fc;">👤 ${escHtml(h.user || '—')}</span>
-                <span style="font-size:10px; color:var(--text3);">${escHtml(h.date)}</span>
+                <div style="display:flex; align-items:center; gap:6px;">
+                  <span style="font-size:10px; color:var(--text3);">${escHtml(h.date)}</span>
+                  ${!h.isVirtual ? `<span onclick="deleteLeadHistoryItem('${id}', '${h.date}', '${encodeURIComponent(h.details)}')" style="font-size:11px; cursor:pointer; opacity:0.4; transition:opacity 0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.4" title="Удалить комментарий">🗑</span>` : ''}
+                </div>
               </div>
               <div style="font-size:13px; color:#fff; line-height:1.4; word-break:break-word; white-space:pre-wrap;">${escHtml(commentText)}</div>
             </div>
@@ -2382,7 +2385,10 @@ function renderLeadMiddleColumn(lead) {
           <div class="timeline-history-item" style="background:${bg}; border:${border}; border-radius:10px; padding:10px 12px; display:flex; flex-direction:column; gap:4px; font-size:12px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom:4px; align-self: stretch;">
             <div style="display:flex; justify-content:space-between; align-items:center; color:var(--text2);">
               <span style="font-weight:700;">${icon} ${escHtml(h.user || '—')}</span>
-              <span style="font-size:10px; color:var(--text3);">${escHtml(h.date)}</span>
+              <div style="display:flex; align-items:center; gap:6px;">
+                <span style="font-size:10px; color:var(--text3);">${escHtml(h.date)}</span>
+                ${!h.isVirtual ? `<span onclick="deleteLeadHistoryItem('${id}', '${h.date}', '${encodeURIComponent(h.details)}')" style="font-size:11px; cursor:pointer; opacity:0.4; transition:opacity 0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.4" title="Удалить запись">🗑</span>` : ''}
+              </div>
             </div>
             <div style="color:var(--text1); line-height:1.4; white-space:pre-wrap;">${escHtml(h.details)}</div>
           </div>
@@ -2816,6 +2822,7 @@ async function addLeadTask(id) {
     Object.assign(lead.fields, updates);
     renderLeadMiddleColumn(lead);
     renderKanban(State.leads);
+    renderLeadsStats();
     toast('Задача добавлена ✓');
   } catch (e) {
     toast('Ошибка добавления задачи: ' + e.message, 'error');
@@ -2859,6 +2866,7 @@ async function toggleTaskDone(leadId, taskId) {
     Object.assign(lead.fields, updates);
     renderLeadMiddleColumn(lead);
     renderKanban(State.leads);
+    renderLeadsStats();
     toast(task.done ? 'Задача выполнена ✓' : 'Задача возвращена в работу');
   } catch (e) {
     toast('Ошибка обновления задачи: ' + e.message, 'error');
@@ -2902,6 +2910,7 @@ async function toggleTaskCancelled(leadId, taskId) {
     Object.assign(lead.fields, updates);
     renderLeadMiddleColumn(lead);
     renderKanban(State.leads);
+    renderLeadsStats();
     toast(task.cancelled ? 'Задача отменена' : 'Задача возвращена в работу');
   } catch (e) {
     toast('Ошибка обновления задачи: ' + e.message, 'error');
@@ -2989,6 +2998,7 @@ async function deleteLeadTask(leadId, taskId) {
     
     renderLeadMiddleColumn(lead);
     renderKanban(State.leads);
+    renderLeadsStats();
     
     if (typeof renderCalendar === 'function') {
       renderCalendar();
@@ -3091,6 +3101,7 @@ async function saveEditTask(leadId, taskId) {
     
     renderLeadMiddleColumn(lead);
     renderKanban(State.leads);
+    renderLeadsStats();
     
     if (typeof renderCalendar === 'function') {
       renderCalendar();
@@ -3105,6 +3116,36 @@ async function saveEditTask(leadId, taskId) {
   }
 }
 
+async function deleteLeadHistoryItem(leadId, date, encodedDetails) {
+  const details = decodeURIComponent(encodedDetails);
+  if (!confirm(`Вы уверены, что хотите удалить эту запись из истории?\n"${details}"`)) return;
+
+  const lead = State.leads.find(l => l.id === leadId);
+  if (!lead) return;
+
+  const history = safeJsonParse(lead.fields['История'] || '[]');
+  const idx = history.findIndex(h => h.date === date && h.details === details);
+  if (idx === -1) {
+    toast('Запись не найдена в истории', 'error');
+    return;
+  }
+
+  history.splice(idx, 1);
+
+  const updates = {
+    'История': JSON.stringify(history)
+  };
+
+  try {
+    await Airtable.update(CONFIG.TABLES.LEADS, leadId, updates);
+    lead.fields['История'] = updates['История'];
+    renderLeadMiddleColumn(lead);
+    toast('Запись удалена ✓');
+  } catch (e) {
+    toast('Ошибка удаления записи: ' + e.message, 'error');
+  }
+}
+
 // Expose these functions to window context
 window.addLeadComment = addLeadComment;
 window.addLeadTask = addLeadTask;
@@ -3115,6 +3156,7 @@ window.startEditTask = startEditTask;
 window.cancelEditTask = cancelEditTask;
 window.saveEditTask = saveEditTask;
 window.deleteLeadTask = deleteLeadTask;
+window.deleteLeadHistoryItem = deleteLeadHistoryItem;
 
 // ─── Синхронизация с Google Календарем
 async function syncGoogleCalendarEvent(lead) {
@@ -4966,6 +5008,7 @@ async function confirmContactLater() {
 
     closeDrawer('drawer-contact-later');
     renderKanban(State.leads);
+    renderLeadsStats();
     
     // Сохраняем в Airtable
     await Airtable.update(CONFIG.TABLES.LEADS, leadId, updates);
