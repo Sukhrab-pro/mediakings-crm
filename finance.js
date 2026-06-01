@@ -25,10 +25,29 @@ async function loadFinance() {
     if (State.employees.length === 0) State.employees = await Airtable.getAll(CONFIG.TABLES.EMPLOYEES);
     if (State.tariffs.length === 0) State.tariffs = await Airtable.getAll(CONFIG.TABLES.TARIFFS);
 
+    initFinancePeriod();
     renderFinanceDashboard();
   } catch (e) {
     toast('Ошибка загрузки финансов: ' + e.message, 'error');
   }
+}
+
+// ─── Динамический расчёт баланса счёта из транзакций
+function calcAccountBalance(accountId) {
+  const acc = State.financeAccounts.find(a => String(a.id) === String(accountId));
+  const initial = Number(acc?.fields['Начальное значение']) || 0;
+
+  const incomeSum = State.financeIncomes.reduce((sum, i) => {
+    const ids = String(i.fields['Источник ID'] || '').split(',').map(x => x.trim());
+    return ids.includes(String(accountId)) ? sum + (Number(i.fields['Сумма']) || 0) : sum;
+  }, 0);
+
+  const expenseSum = State.financeExpenses.reduce((sum, e) => {
+    const ids = String(e.fields['Источник ID'] || '').split(',').map(x => x.trim());
+    return ids.includes(String(accountId)) ? sum + (Number(e.fields['Сумма']) || 0) : sum;
+  }, 0);
+
+  return initial + incomeSum - expenseSum;
 }
 
 // ─── Вспомогательные функции для работы с датами и категориями
@@ -75,18 +94,24 @@ function getYYYYMMDD(dateStr) {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+let _financePeriodInitialized = false;
+
 function initFinancePeriod() {
+  if (_financePeriodInitialized) return; // Только при первой загрузке
   const startEl = document.getElementById('fin-date-start');
   const endEl = document.getElementById('fin-date-end');
-  
   if (startEl && endEl && !startEl.value && !endEl.value) {
     const now = new Date();
     const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
     const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-    
     startEl.value = formatLocalDateToYMD(firstDay);
     endEl.value = formatLocalDateToYMD(lastDay);
   }
+  _financePeriodInitialized = true;
+}
+
+function resetFinancePeriodInit() {
+  _financePeriodInitialized = false;
 }
 
 function filterByPeriod(txDateStr) {
@@ -103,8 +128,6 @@ function filterByPeriod(txDateStr) {
 
 // ─── Рендеринг дашборда и реестра транзакций
 function renderFinanceDashboard() {
-  // Инициализация периода
-  initFinancePeriod();
 
   // 1. Отрисовка счетов
   renderAccountsList();
@@ -147,13 +170,29 @@ function renderFinanceDashboard() {
   });
 
   // 4. Расчет метрик
+  // Баланс каждого счёта = Начальное значение + все доходы по нему - все расходы по нему (из всех транзакций в State)
   const totalBalance = State.financeAccounts
     .filter(a => a.fields['Вкл'])
-    .reduce((sum, a) => sum + (Number(a.fields['Баланс счета']) || 0), 0);
+    .reduce((sum, a) => sum + calcAccountBalance(a.id), 0);
 
-  const totalIncomeExpected = filteredIncomes
-    .filter(i => getTransactionCategoryType(i.fields) === 'Доходы')
-    .reduce((sum, i) => sum + (Number(i.fields['Цена тарифа']) || Number(i.fields['Сумма']) || 0), 0);
+  // Выручка по цене = сумма Стоимость заказа уникальных проектов из доходов периода
+  // Если у дохода нет проекта — берём Цена тарифа (или Сумма)
+  const incomeDeals = filteredIncomes.filter(i => getTransactionCategoryType(i.fields) === 'Доходы');
+  const countedDealIds = new Set();
+  const totalIncomeExpected = incomeDeals.reduce((sum, i) => {
+    const dealIdStr = String(i.fields['Заказ ID'] || '').split(',')[0].trim();
+    if (dealIdStr) {
+      if (countedDealIds.has(dealIdStr)) return sum; // уже считали этот проект
+      countedDealIds.add(dealIdStr);
+      const deal = (State.deals || []).find(d => String(d.id) === dealIdStr);
+      const dealPrice = Number(deal?.fields['Стоимость заказа']) || 0;
+      if (dealPrice > 0) return sum + dealPrice;
+    }
+    // Нет проекта — берём Цена тарифа или Сумма
+    const tp = Number(i.fields['Цена тарифа']) || 0;
+    const s = Number(i.fields['Сумма']) || 0;
+    return sum + (tp > s ? tp : s); // берём большее (цена договора >= фактической оплаты)
+  }, 0);
 
   const totalIncomeActual = filteredIncomes
     .filter(i => getTransactionCategoryType(i.fields) === 'Доходы')
@@ -228,7 +267,9 @@ function renderFinanceDashboard() {
     return true;
   });
 
-  renderUnifiedTransactionsTable(merged.slice(0, 100));
+  State.financeMergedAll = merged;
+  State.financeTablePage = 1;
+  renderUnifiedTransactionsTable(merged);
 }
 
 // ─── Отрисовка счетов
@@ -244,7 +285,7 @@ function renderAccountsList() {
   
   listEl.innerHTML = activeAccs.map(acc => {
     const isSelected = String(State.financeSelectedAccount) === String(acc.id);
-    const balance = Number(acc.fields['Баланс счета']) || 0;
+    const balance = calcAccountBalance(acc.id);
     const formattedBalance = balance.toLocaleString('ru-RU') + ' ' + (acc.fields['Валюта'] || '₸');
     const pillStyle = isSelected
       ? `background:var(--accent-gradient); border-color:transparent; color:#fff;`
@@ -273,12 +314,17 @@ function renderUnifiedTransactionsTable(transactions) {
   const tbody = document.getElementById('finance-tbody');
   if (!tbody) return;
 
+  // Счётчик записей
+  const countEl = document.getElementById('finance-table-count');
+  if (countEl) countEl.textContent = `${transactions.length} записей`;
+
   if (transactions.length === 0) {
     tbody.innerHTML = `<tr><td colspan="8" class="an-empty">Нет записей за выбранный период</td></tr>`;
     return;
   }
 
-  tbody.innerHTML = transactions.map(item => {
+  try {
+  const rows = transactions.map(item => {
     const f = item.fields;
     const amount = Number(f['Сумма']) || 0;
     const type = item._type;
@@ -315,22 +361,18 @@ function renderUnifiedTransactionsTable(transactions) {
     const accountName = f['Источник'] || '—';
     const categoryName = f['Категория'] || '—';
     
-    let clientDealHtml = '';
-    if (isIncome || isInflow) {
-      const clientName = f['Клиент'] || '—';
-      const dealName = f['Заказ'] || '—';
-      clientDealHtml = `
-        <div style="font-weight:600;">${escHtml(clientName)}</div>
-        <div style="font-size:11px; color:var(--text2);">${escHtml(dealName)}</div>
-      `;
-    } else {
-      const employeeName = f['Сотрудник'] || '—';
-      const dealName = f['Заказ'] || '—';
-      clientDealHtml = `
-        <div style="font-weight:600;">${escHtml(employeeName)}</div>
-        <div style="font-size:11px; color:var(--text2);">${escHtml(dealName)}</div>
-      `;
-    }
+    // Проект (отдельно)
+    const projectName = f['Заказ'] || '';
+    const projectHtml = projectName
+      ? `<span style="font-size:12px; font-weight:600; color:#fff;">${escHtml(projectName)}</span>`
+      : `<span style="color:var(--text2);">—</span>`;
+
+    // Заявка (отдельно)
+    const leadIdForCol = f['Лид ID'] || '';
+    const leadForCol = leadIdForCol ? (State.leads || []).find(l => l.id === leadIdForCol) : null;
+    const leadCellHtml = leadIdForCol
+      ? `<span onclick="openLeadFromFinance('${leadIdForCol}')" style="color:#a5b4fc; cursor:pointer; font-weight:600; font-size:12px;" title="${escHtml(leadForCol?.fields['Имя']||'')}">🎯 #${leadIdForCol}</span>`
+      : `<span style="color:var(--text2);">—</span>`;
     
     const note = f['Примечание'] || '';
     let metaDetails = `👤 ${escHtml(f['Кто добавил'] || '—')}`;
@@ -344,29 +386,38 @@ function renderUnifiedTransactionsTable(transactions) {
       if (budget) metaDetails += ' | Бюджет: ' + escHtml(budget);
     }
     
+    const dateStr = formatDate(f['Дата транзакции']);
+    const deleteFnCall = item._table === 'incomes' ? `deleteIncome('${item.id}')` : `deleteExpense('${item.id}')`;
+    const txId = f['ID транзакции'] || '—';
+
     const noteHtml = `
       <div style="font-weight:600; max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escHtml(note)}">${escHtml(note || '—')}</div>
       <div style="font-size:11px; color:var(--text2); margin-top:2px;">${metaDetails}</div>
     `;
-    
-    const dateStr = formatDate(f['Дата транзакции']);
-    const deleteFnCall = item._table === 'incomes' ? `deleteIncome('${item.id}')` : `deleteExpense('${item.id}')`;
-    
+
     return `
       <tr>
+        <td style="font-size:11px; color:var(--text2); font-weight:600; white-space:nowrap;">${escHtml(txId)}</td>
         <td style="white-space:nowrap;">${dateStr}</td>
         <td>${typeHtml}</td>
         <td>${amountHtml}</td>
         <td><span class="badge badge-gray">${escHtml(accountName)}</span></td>
         <td><span class="badge badge-gray" style="background:rgba(255,255,255,0.06); color:#fff;">${escHtml(categoryName)}</span></td>
-        <td>${clientDealHtml}</td>
+        <td>${projectHtml}</td>
+        <td>${leadCellHtml}</td>
         <td>${noteHtml}</td>
-        <td>
+        <td style="white-space:nowrap;">
+          <button onclick="openEditTransactionDrawer('${item.id}','${item._table}')" style="background:none; border:none; color:#60a5fa; cursor:pointer; font-size:14px; padding:4px;" title="Редактировать">✏️</button>
           <button onclick="${deleteFnCall}" style="background:none; border:none; color:var(--danger); cursor:pointer; font-size:14px; padding:4px;" title="Удалить запись">🗑️</button>
         </td>
       </tr>
     `;
   }).join('');
+  tbody.innerHTML = rows;
+  } catch(e) {
+    console.error('renderUnifiedTransactionsTable error:', e);
+    tbody.innerHTML = `<tr><td colspan="9" style="color:var(--danger); padding:12px; text-align:center;">Ошибка рендера: ${e.message}</td></tr>`;
+  }
 }
 
 // ─── Заполнение выпадающих списков
@@ -421,26 +472,10 @@ async function populateFinanceAccountsSelect(selectId) {
 }
 window.populateFinanceAccountsSelect = populateFinanceAccountsSelect;
 
-// ─── Изменение баланса счета в Baserow
+// ─── Баланс теперь считается динамически из транзакций — adjustAccountBalance больше не обновляет Baserow
 async function adjustAccountBalance(accountId, amountChange) {
-  if (!accountId) return;
-  try {
-    if (State.financeAccounts.length === 0) {
-      State.financeAccounts = await Airtable.getAll(CONFIG.TABLES.FINANCE_ACCOUNTS);
-    }
-    const acc = State.financeAccounts.find(a => String(a.id) === String(accountId));
-    if (acc) {
-      const currentBalance = Number(acc.fields['Баланс счета']) || 0;
-      const newBalance = currentBalance + amountChange;
-      await Airtable.update(CONFIG.TABLES.FINANCE_ACCOUNTS, accountId, {
-        'Баланс счета': newBalance
-      });
-      acc.fields['Баланс счета'] = newBalance;
-      renderAccountsList();
-    }
-  } catch (e) {
-    console.error('Ошибка изменения баланса счета:', e);
-  }
+  // Баланс отображается из calcAccountBalance() — ничего не пишем в Baserow
+  renderAccountsList();
 }
 window.adjustAccountBalance = adjustAccountBalance;
 
@@ -504,6 +539,143 @@ function matchTariffToCategory(tariffName) {
 window.matchTariffToCategory = matchTariffToCategory;
 
 // ─── События фильтров и кнопок сброса периода
+// ─── Редактирование транзакции
+async function openEditTransactionDrawer(id, table) {
+  const record = table === 'incomes'
+    ? State.financeIncomes.find(i => i.id === id)
+    : State.financeExpenses.find(e => e.id === id);
+  if (!record) { toast('Запись не найдена', 'error'); return; }
+
+  const f = record.fields;
+
+  // Определяем тип по категории
+  const catType = getTransactionCategoryType(f);
+  const type = catType || (table === 'incomes' ? 'Доходы' : 'Расходы');
+
+  await prepareUnifiedOpDrawer(type);
+
+  // Заполняем поля
+  document.getElementById('uni-amount').value = Number(f['Сумма']) || '';
+  document.getElementById('uni-date').value = f['Дата транзакции'] || '';
+  document.getElementById('uni-note').value = f['Примечание'] || '';
+
+  // Счёт
+  const accId = f['Источник ID'] ? String(f['Источник ID']).split(',')[0].trim() : '';
+  if (accId) document.getElementById('uni-account').value = accId;
+
+  // Категория
+  const catId = f['Категория ID'] ? String(f['Категория ID']).split(',')[0].trim() : '';
+  if (catId) document.getElementById('uni-category').value = catId;
+
+  // Для доходов
+  if (type === 'Доходы') {
+    const clientId = f['Клиент ID'] ? String(f['Клиент ID']).split(',')[0].trim() : '';
+    if (clientId) document.getElementById('uni-client').value = clientId;
+    const dealId = f['Заказ ID'] ? String(f['Заказ ID']).split(',')[0].trim() : '';
+    if (dealId) { await onUnifiedClientChange(clientId); document.getElementById('uni-deal').value = dealId; }
+    const empId = f['Менеджер ID'] ? String(f['Менеджер ID']).split(',')[0].trim() : '';
+    if (empId) document.getElementById('uni-employee').value = empId;
+    if (f['Партнер']) document.getElementById('uni-partner').value = f['Партнер'];
+  }
+
+  // Для расходов
+  if (type === 'Расходы') {
+    const empId = f['Сотрудник ID'] ? String(f['Сотрудник ID']).split(',')[0].trim() : '';
+    if (empId) document.getElementById('uni-employee').value = empId;
+    if (f['Бюджет']) document.getElementById('uni-budget').value = f['Бюджет'];
+  }
+
+  // Лид
+  const leadId = f['Лид ID'] || '';
+  if (leadId) {
+    document.getElementById('uni-lead-id').value = leadId;
+    const lead = (State.leads || []).find(l => l.id === leadId);
+    if (lead) showLeadLinkInForm(lead);
+  }
+
+  // Меняем заголовок и кнопку сохранения
+  document.getElementById('unified-op-title').textContent = '✏️ Редактировать операцию';
+  const saveBtn = document.getElementById('save-unified-op-btn');
+  saveBtn.textContent = '💾 Сохранить изменения';
+  saveBtn.onclick = () => saveEditTransaction(id, table);
+
+  openDrawer('drawer-operation-unified');
+}
+window.openEditTransactionDrawer = openEditTransactionDrawer;
+
+async function saveEditTransaction(id, table) {
+  const btn = document.getElementById('save-unified-op-btn');
+  const type = document.getElementById('uni-op-type').value;
+  const amount = Number(document.getElementById('uni-amount').value) || 0;
+  const date = document.getElementById('uni-date').value;
+  const accountId = document.getElementById('uni-account').value;
+  const categoryId = document.getElementById('uni-category').value;
+  const note = document.getElementById('uni-note').value.trim();
+
+  if (!amount) { toast('Введите сумму', 'error'); return; }
+  if (!date)   { toast('Выберите дату', 'error'); return; }
+  if (!accountId) { toast('Выберите счёт', 'error'); return; }
+  if (!categoryId) { toast('Выберите категорию', 'error'); return; }
+
+  btn.innerHTML = `<span class="spinner"></span>`; btn.disabled = true;
+  try {
+    const tableId = table === 'incomes' ? CONFIG.TABLES.FINANCE_INCOMES : CONFIG.TABLES.FINANCE_EXPENSES;
+    let fields = {
+      'Дата транзакции': date,
+      'Сумма': amount,
+      'Примечание': note,
+      'Источник ID': [accountId],
+      'Категория ID': [categoryId],
+      'Лид ID': document.getElementById('uni-lead-id').value || '',
+    };
+
+    if (table === 'incomes') {
+      fields['Цена тарифа'] = amount;
+      const clientId = document.getElementById('uni-client')?.value || '';
+      const dealId   = document.getElementById('uni-deal')?.value || '';
+      const empId    = document.getElementById('uni-employee')?.value || '';
+      const partner  = document.getElementById('uni-partner')?.value || '';
+      fields['Клиент ID']   = clientId ? [clientId] : [];
+      fields['Заказ ID']    = dealId   ? [dealId]   : [];
+      fields['Менеджер ID'] = empId    ? [empId]    : [];
+      fields['Партнер']     = partner;
+    } else {
+      const empId  = document.getElementById('uni-employee')?.value || '';
+      const budget = document.getElementById('uni-budget')?.value.trim() || '';
+      const dealId = document.getElementById('uni-deal')?.value || '';
+      fields['Сотрудник ID'] = empId  ? [empId]  : [];
+      fields['Заказ ID']     = dealId ? [dealId] : [];
+      fields['Бюджет']       = budget;
+    }
+
+    await Airtable.update(tableId, id, fields);
+
+    // Обновляем в State
+    const arr = table === 'incomes' ? State.financeIncomes : State.financeExpenses;
+    const rec = arr.find(r => r.id === id);
+    if (rec) Object.assign(rec.fields, fields);
+
+    toast('Операция обновлена ✓');
+    closeDrawer('drawer-operation-unified');
+    renderFinanceDashboard();
+  } catch(e) {
+    toast('Ошибка: ' + e.message, 'error');
+  } finally {
+    btn.innerHTML = '💾 Сохранить изменения'; btn.disabled = false;
+  }
+}
+window.saveEditTransaction = saveEditTransaction;
+
+function openLeadFromFinance(leadId) {
+  navigate('leads');
+  setTimeout(() => {
+    if (typeof openLeadDetail === 'function') {
+      openLeadDetail(leadId);
+    }
+  }, 800);
+}
+window.openLeadFromFinance = openLeadFromFinance;
+
 function onFinanceDateRangeChange() {
   renderFinanceDashboard();
 }
@@ -548,6 +720,97 @@ function resetFinancePeriodToLastMonth() {
 }
 window.resetFinancePeriodToLastMonth = resetFinancePeriodToLastMonth;
 
+// ─── При выборе проекта → автозаполнение цены и лида
+function onUniDealChange(dealId) {
+  if (!dealId) return;
+  const deal = (State.deals || []).find(d => d.id === dealId);
+  if (!deal) return;
+
+  // 1. Подставляем цену по договору
+  const dealPrice = Number(deal.fields['Стоимость заказа'] || deal.fields['Стоимость'] || 0);
+  if (dealPrice > 0) {
+    const tariffInput = document.getElementById('uni-tariff-price');
+    if (tariffInput && !tariffInput.value) tariffInput.value = dealPrice;
+    // Если сумма в кассу не заполнена — подставляем тоже
+    const amountInput = document.getElementById('uni-amount');
+    if (amountInput && !amountInput.value) amountInput.value = dealPrice;
+  }
+
+  // 2. Берём лида из link_row поля Заявка на проекте
+  const zayvkaIds = String(deal.fields['Заявка ID'] || '').split(',').map(x => x.trim()).filter(Boolean);
+  const linkedLeadId = zayvkaIds[0] || '';
+  const linkedLead = linkedLeadId ? (State.leads || []).find(l => String(l.id) === linkedLeadId) : null;
+
+  if (linkedLead) {
+    document.getElementById('uni-lead-id').value = linkedLead.id;
+    showLeadLinkInForm(linkedLead);
+  }
+}
+window.onUniDealChange = onUniDealChange;
+
+// ─── Поиск лида в форме добавления операции
+function onUniLeadSearch(query) {
+  const dropdown = document.getElementById('uni-lead-dropdown');
+  if (!dropdown) return;
+  const q = query.trim().toLowerCase();
+  if (!q) { dropdown.style.display = 'none'; return; }
+
+  const leads = (State.leads || []).filter(l => {
+    const name = (l.fields['Имя'] || '').toLowerCase();
+    const phone = (l.fields['Телефон'] || '').toLowerCase();
+    const lid = String(l.id).toLowerCase();
+    return name.includes(q) || phone.includes(q) || lid.includes(q);
+  }).slice(0, 8);
+
+  if (!leads.length) { dropdown.style.display = 'none'; return; }
+
+  dropdown.innerHTML = leads.map(l => {
+    const f = l.fields;
+    const budget = Number(f['Бюджет']) || 0;
+    const paid = typeof calculateLeadPayments === 'function' ? calculateLeadPayments(l) : 0;
+    return `<div onclick="selectUniLead('${l.id}','${escHtml(f['Имя']||'')}')"
+      style="padding:10px 14px; cursor:pointer; border-bottom:1px solid rgba(255,255,255,0.05); transition:background 0.15s;"
+      onmouseover="this.style.background='rgba(255,255,255,0.05)'"
+      onmouseout="this.style.background=''">
+      <div style="font-weight:700; color:#fff; font-size:13px;">🎯 ${escHtml(f['Имя']||'—')} <span style="color:var(--text2); font-weight:400; font-size:11px;">#${l.id}</span></div>
+      <div style="font-size:11px; color:var(--text2); margin-top:2px;">${escHtml(f['Телефон']||'')} ${budget ? '· бюджет: ' + budget.toLocaleString('ru-RU') + ' ₸' : ''} ${paid ? '· оплачено: ' + paid.toLocaleString('ru-RU') + ' ₸' : ''}</div>
+    </div>`;
+  }).join('');
+  dropdown.style.display = 'block';
+}
+window.onUniLeadSearch = onUniLeadSearch;
+
+function selectUniLead(leadId, leadName) {
+  document.getElementById('uni-lead-id').value = leadId;
+  const searchEl = document.getElementById('uni-lead-search');
+  const dropdown = document.getElementById('uni-lead-dropdown');
+  const selectedEl = document.getElementById('uni-lead-selected');
+  const nameEl = document.getElementById('uni-lead-selected-name');
+  if (searchEl) searchEl.style.display = 'none';
+  if (dropdown) dropdown.style.display = 'none';
+  if (selectedEl) selectedEl.style.display = 'flex';
+  if (nameEl) nameEl.textContent = '🎯 ' + leadName;
+  // Подставляем остаток как сумму
+  const lead = (State.leads || []).find(l => l.id === leadId);
+  if (lead) {
+    const paid = typeof calculateLeadPayments === 'function' ? calculateLeadPayments(lead) : 0;
+    const remaining = (Number(lead.fields['Бюджет']) || 0) - paid;
+    if (remaining > 0 && !document.getElementById('uni-amount').value) {
+      document.getElementById('uni-amount').value = remaining;
+    }
+  }
+}
+window.selectUniLead = selectUniLead;
+
+function clearUniLeadLink() {
+  document.getElementById('uni-lead-id').value = '';
+  const searchEl = document.getElementById('uni-lead-search');
+  const selectedEl = document.getElementById('uni-lead-selected');
+  if (searchEl) { searchEl.style.display = ''; searchEl.value = ''; }
+  if (selectedEl) selectedEl.style.display = 'none';
+}
+window.clearUniLeadLink = clearUniLeadLink;
+
 function resetFinancePeriodToCurrentYear() {
   const startEl = document.getElementById('fin-date-start');
   const endEl = document.getElementById('fin-date-end');
@@ -573,6 +836,13 @@ window.resetFinancePeriodToAllTime = resetFinancePeriodToAllTime;
 
 // ─── Единая форма добавления операции (Unified Op Drawer)
 async function openAddOperationMenu() {
+  // Сбрасываем заголовок и кнопку на режим добавления
+  document.getElementById('unified-op-title').textContent = '➕ Добавить операцию';
+  const saveBtn = document.getElementById('save-unified-op-btn');
+  if (saveBtn) {
+    saveBtn.textContent = 'Сохранить операцию';
+    saveBtn.onclick = saveUnifiedOperation;
+  }
   openDrawer('drawer-operation-unified');
   await prepareUnifiedOpDrawer();
 }
@@ -584,8 +854,16 @@ async function prepareUnifiedOpDrawer(type = 'Доходы') {
   document.getElementById('uni-partner').value = '';
   document.getElementById('uni-budget').value = '';
   document.getElementById('uni-note').value = '';
+  const tpInput = document.getElementById('uni-tariff-price'); if (tpInput) tpInput.value = '';
   document.getElementById('uni-lead-id').value = ''; // сброс лида
-  
+  // Сброс поиска лида
+  const leadSearch = document.getElementById('uni-lead-search');
+  const leadSelected = document.getElementById('uni-lead-selected');
+  const leadDropdown = document.getElementById('uni-lead-dropdown');
+  if (leadSearch) { leadSearch.style.display = ''; leadSearch.value = ''; }
+  if (leadSelected) leadSelected.style.display = 'none';
+  if (leadDropdown) leadDropdown.style.display = 'none';
+
   const typeSelect = document.getElementById('uni-op-type');
   if (typeSelect) typeSelect.value = type;
   setUnifiedOpTypeEnabled(true);
@@ -634,9 +912,15 @@ async function openUniNewDealForm() {
   State.uniDealCallbackActive = true;
   
   // Clear d-name, d-amount, d-comment, d-date-start
-  ['d-name','d-amount','d-date-start','d-comment'].forEach(elId => {
+  ['d-name','d-amount','d-date-start','d-comment','d-lead-id'].forEach(elId => {
     const el = document.getElementById(elId); if (el) el.value = '';
   });
+  // Пробрасываем lead ID
+  const currentLeadId = document.getElementById('uni-lead-id')?.value || '';
+  if (currentLeadId) {
+    const dLeadId = document.getElementById('d-lead-id');
+    if (dLeadId) dLeadId.value = currentLeadId;
+  }
   
   const selectedClientId = document.getElementById('uni-client')?.value || '';
   if (typeof populateClientSelect === 'function') populateClientSelect();
@@ -801,10 +1085,14 @@ function onUnifiedOpTypeChange(type) {
   }
   
   const tariffPriceGroup = document.getElementById('uni-tariff-price-group');
-  if (tariffPriceGroup) tariffPriceGroup.style.display = isIncome ? 'block' : 'none';
+  if (tariffPriceGroup) {
+    tariffPriceGroup.style.display = isIncome ? 'block' : 'none';
+    if (!isIncome) { const tp = document.getElementById('uni-tariff-price'); if (tp) tp.value = ''; }
+  }
   
+  // Клиент скрыт — используем Заявку и Проект
   const clientGroup = document.getElementById('uni-client-group');
-  if (clientGroup) clientGroup.style.display = isIncome ? 'block' : 'none';
+  if (clientGroup) clientGroup.style.display = 'none';
   
   const dealGroup = document.getElementById('uni-deal-group');
   if (dealGroup) dealGroup.style.display = (isIncome || isExpense) ? 'block' : 'none';
@@ -823,7 +1111,11 @@ function onUnifiedOpTypeChange(type) {
   
   const budgetGroup = document.getElementById('uni-budget-group');
   if (budgetGroup) budgetGroup.style.display = isExpense ? 'block' : 'none';
-  
+
+  // Заявка — показываем для всех типов
+  const leadLinkGroup = document.getElementById('uni-lead-link-group');
+  if (leadLinkGroup) leadLinkGroup.style.display = 'block';
+
   populateDropdown('uni-category', CONFIG.TABLES.FINANCE_CATEGORIES, 'Выберите категорию', 'Наименование', c => c.fields['Тип'] === type && c.fields['Вкл']);
 }
 window.onUnifiedOpTypeChange = onUnifiedOpTypeChange;
@@ -931,7 +1223,8 @@ async function saveUnifiedOperation() {
 
     // 4. Проведение финансовой записи
     if (type === 'Доходы' || type === 'Приходы') {
-      const tariffPrice = amount;
+      const tariffPriceInput = Number(document.getElementById('uni-tariff-price')?.value) || 0;
+      const tariffPrice = (type === 'Доходы' && tariffPriceInput > 0) ? tariffPriceInput : amount;
       const employeeId = type === 'Доходы' ? document.getElementById('uni-employee').value : '';
       const partner = type === 'Доходы' ? document.getElementById('uni-partner').value : '';
       const note = document.getElementById('uni-note').value.trim();
@@ -950,10 +1243,12 @@ async function saveUnifiedOperation() {
         'Клиент ID': clientId ? [clientId] : [],
         'Менеджер ID': employeeId ? [employeeId] : [],
         'Заказ ID': dealId ? [dealId] : [],
-        'Партнер': partner
+        'Партнер': partner,
+        'Лид ID': leadId || ''
       };
-      
-      await Airtable.create(CONFIG.TABLES.FINANCE_INCOMES, fields);
+
+      const newInc = await Airtable.create(CONFIG.TABLES.FINANCE_INCOMES, fields);
+      if (newInc.records?.[0]) State.financeIncomes.push(newInc.records[0]);
       await adjustAccountBalance(accountId, amount);
     } else {
       const employeeId = type === 'Расходы' ? document.getElementById('uni-employee').value : '';
@@ -1005,7 +1300,7 @@ function renderManageAccountsList() {
 
   container.innerHTML = State.financeAccounts.map(acc => {
     const f = acc.fields;
-    const balance = Number(f['Баланс счета']) || 0;
+    const balance = (State.financeIncomes.length || State.financeExpenses.length) ? calcAccountBalance(acc.id) : (Number(f['Баланс счета']) || 0);
     const isMain = f['Основной'] ? true : false;
 
     return `

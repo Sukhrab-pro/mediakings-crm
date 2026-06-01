@@ -191,7 +191,7 @@ async function loadPage(page) {
   if (page === 'clients')    await loadClients();
   if (page === 'deals')      await loadDeals();
   if (page === 'operations') await loadOperations();
-  if (page === 'finance')    await loadFinance();
+  if (page === 'finance')    { resetFinancePeriodInit(); await loadFinance(); }
   if (page === 'calendar')   await loadCalendarPage();
   if (page === 'analytics')  await loadAnalytics();
   if (page === 'employees')  await loadAdminEmployees();

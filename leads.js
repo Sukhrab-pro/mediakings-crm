@@ -102,9 +102,6 @@ async function undoLeadEdit(id) {
       const budgetEl = document.getElementById('ei-budget');
       if (budgetEl) budgetEl.value = snapshot['Бюджет'] || '';
       
-      const durationEl = document.getElementById('ei-duration');
-      if (durationEl) durationEl.value = snapshot['Длительность'] || '';
-      
       const managerEl = document.getElementById('ei-manager');
       if (managerEl) {
         const managerName = snapshot['Менеджер'];
@@ -378,6 +375,7 @@ function syncConsultationTasks(leads) {
         assignedDate: assignYmd,
         dueDate: ymd,
         dueTime: timeVal,
+        duration: Number(f['Длительность']) || 30,
         done: isDone,
         completedAt: isDone ? nowStr : '',
         user: managerName,
@@ -636,11 +634,13 @@ function renderLeadsStats() {
       const niche = (l.fields['Ниша'] || l.fields['Ниша клиента'] || '').toLowerCase();
       const source = (getField(l.fields, CONFIG.LEAD_FIELDS.source) || '').toLowerCase();
       const comment = (l.fields['Комментарий'] || '').toLowerCase();
-      return name.includes(q) || 
-             (qPhone && phone.includes(qPhone)) || 
-             niche.includes(q) || 
-             source.includes(q) || 
-             comment.includes(q);
+      const lid = String(l.id);
+      return name.includes(q) ||
+             (qPhone && phone.includes(qPhone)) ||
+             niche.includes(q) ||
+             source.includes(q) ||
+             comment.includes(q) ||
+             lid.includes(q.replace('#',''));
     });
   }
 
@@ -1365,8 +1365,9 @@ function renderKanban(leads) {
       const matchesNiche = niche.includes(q);
       const matchesSource = source.includes(q);
       const matchesComment = comment.includes(q);
-      
-      if (!matchesName && !matchesPhone && !matchesNiche && !matchesSource && !matchesComment) return;
+      const matchesId = String(lead.id).includes(q.replace('#',''));
+
+      if (!matchesName && !matchesPhone && !matchesNiche && !matchesSource && !matchesComment && !matchesId) return;
     }
 
     const stage = getField(lead.fields, CONFIG.LEAD_FIELDS.stage) || 'Новая заявка';
@@ -1495,7 +1496,7 @@ function renderKanban(leads) {
               <div class="kanban-card-checkbox"></div>
               <div class="kanban-card-top">
                 <div class="kanban-card-name">${name}</div>
-                ${mgBadge}
+                <div style="display:flex; align-items:center; gap:6px;">${mgBadge}<span style="font-size:10px; color:var(--text2); font-weight:600;">#${lead.id}</span></div>
               </div>
               ${lead.fields['Ниша'] ? `<div class="kanban-card-sub" style="color:#a5b4fc; font-weight: 500;">💼 ${escHtml(lead.fields['Ниша'])}</div>` : ''}
               ${phone  ? `<div class="kanban-card-sub">📱 ${escHtml(phone)}</div>` : ''}
@@ -1530,7 +1531,24 @@ function renderKanban(leads) {
                 
                 return `<div class="kanban-card-sub" style="color:${color}; font-weight:600; font-size:11px;" title="${escHtml(t.text)}">${icon} ${formatDate(t.dueDate)}${timeStr}: ${escHtml(t.text)}</div>`;
               })()}
-              ${budget  ? `<div class="kanban-card-sub" style="color:#34d399">💰 ${Number(budget).toLocaleString('ru-RU')} ₸</div>` : ''}
+              ${(() => {
+                const projectPrice = getLeadProjectPrice(lead);
+                const budget = projectPrice || Number(lead.fields['Бюджет']) || 0;
+                if (!budget) return '';
+                const paid = calculateLeadPayments(lead);
+                const pct = paid > 0 ? Math.min(Math.round((paid / Number(budget)) * 100), 100) : 0;
+                if (paid > 0) {
+                  const barColor = pct >= 100 ? '#34d399' : pct >= 50 ? '#f59e0b' : '#6366f1';
+                  return `<div class="kanban-card-sub" style="color:#34d399">
+                    💰 ${Number(budget).toLocaleString('ru-RU')} ₸
+                    <span style="color:${barColor}; font-weight:700; margin-left:4px;">${pct}% оплачено</span>
+                  </div>
+                  <div style="background:rgba(255,255,255,0.08); border-radius:3px; height:3px; margin:3px 0 0; overflow:hidden;">
+                    <div style="height:3px; border-radius:3px; background:${barColor}; width:${pct}%;"></div>
+                  </div>`;
+                }
+                return `<div class="kanban-card-sub" style="color:#34d399">💰 ${Number(budget).toLocaleString('ru-RU')} ₸</div>`;
+              })()}
               ${nonTargetReason ? `<div class="kanban-card-sub" style="color:#94a3b8;font-size:11px">🚫 ${escHtml(nonTargetReason)}</div>` : ''}
               ${src    ? `<div class="kanban-card-sub" style="opacity:.6">${escHtml(src)}</div>` : ''}
             </div>`;
@@ -2274,6 +2292,9 @@ function renderLeadMiddleColumn(lead) {
             const task = tasks.find(t => t.id === taskId);
             if (task) {
               renderedTaskIds.add(task.id);
+              if (State.editingTaskId === task.id) {
+                return renderInlineTaskEditForm(id, task);
+              }
               const isOverdue = !task.done && !task.cancelled && task.dueDate && task.dueDate < todayStr;
               const isToday = !task.done && !task.cancelled && task.dueDate === todayStr;
               const dueClass = isOverdue ? 'overdue' : (isToday ? 'today' : 'future');
@@ -2292,12 +2313,16 @@ function renderLeadMiddleColumn(lead) {
                       <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:6px; font-size:10px;">
                         <span style="color:var(--text2)">👤 ${escHtml(task.user || '—')}</span>
                         <span class="task-due ${dueClass}" style="font-weight:700; padding:1px 6px; border-radius:4px;">${statusLabel}: ${formatDate(task.dueDate)}${timeStr}</span>
+                        ${task.duration ? `<span style="color:var(--text3)">⏱ ${task.duration} мин</span>` : ''}
                       </div>
                     `}
                   </div>
-                  ${(!task.done && !task.cancelled) ? `
-                    <span onclick="toggleTaskCancelled('${id}', '${task.id}')" style="position:absolute; right:12px; top:12px; font-size:11px; cursor:pointer; opacity:0.4; transition:opacity 0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.4" title="Отменить задачу">❌</span>
-                  ` : ''}
+                  <div style="position:absolute; right:12px; top:12px; display:flex; gap:6px; align-items:center;">
+                    ${(!task.done && !task.cancelled) ? `
+                      <span onclick="startEditTask('${task.id}')" style="font-size:12px; cursor:pointer; opacity:0.4; transition:opacity 0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.4" title="Редактировать задачу">✏️</span>
+                      <span onclick="toggleTaskCancelled('${id}', '${task.id}')" style="font-size:11px; cursor:pointer; opacity:0.4; transition:opacity 0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.4" title="Отменить задачу">❌</span>
+                    ` : ''}
+                  </div>
                 </div>
               `;
             }
@@ -2357,6 +2382,9 @@ function renderLeadMiddleColumn(lead) {
         <div style="font-size:12px; font-weight:800; color:var(--text2); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:8px;">📋 Активные задачи (${activeTasks.length})</div>
         <div style="display:flex; flex-direction:column; gap:8px;">
           ${activeTasks.map(task => {
+            if (State.editingTaskId === task.id) {
+              return renderInlineTaskEditForm(id, task);
+            }
             const isOverdue = task.dueDate && task.dueDate < todayStr;
             const isToday = task.dueDate === todayStr;
             const dueClass = isOverdue ? 'overdue' : (isToday ? 'today' : 'future');
@@ -2371,9 +2399,13 @@ function renderLeadMiddleColumn(lead) {
                   <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:6px; font-size:10px;">
                     <span style="color:var(--text2)">👤 ${escHtml(task.user || '—')}</span>
                     <span class="task-due ${dueClass}" style="font-weight:700; padding:1px 6px; border-radius:4px;">${statusLabel}: ${formatDate(task.dueDate)}${timeStr}</span>
+                    ${task.duration ? `<span style="color:var(--text3)">⏱ ${task.duration} мин</span>` : ''}
                   </div>
                 </div>
-                <span onclick="toggleTaskCancelled('${id}', '${task.id}')" style="position:absolute; right:12px; top:12px; font-size:11px; cursor:pointer; opacity:0.4; transition:opacity 0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.4" title="Отменить задачу">❌</span>
+                <div style="position:absolute; right:12px; top:12px; display:flex; gap:6px; align-items:center;">
+                  <span onclick="startEditTask('${task.id}')" style="font-size:12px; cursor:pointer; opacity:0.4; transition:opacity 0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.4" title="Редактировать задачу">✏️</span>
+                  <span onclick="toggleTaskCancelled('${id}', '${task.id}')" style="font-size:11px; cursor:pointer; opacity:0.4; transition:opacity 0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.4" title="Отменить задачу">❌</span>
+                </div>
               </div>
             `;
           }).join('')}
@@ -2408,6 +2440,7 @@ function renderLeadMiddleColumn(lead) {
           <div class="inline-form-row" style="display:flex; gap:6px; align-items:center;">
             <input type="date" id="ei-new-task-date" class="form-input compact-input" value="${tomorrowStr}" onclick="try{this.showPicker()}catch(e){}" style="flex:1; height:28px !important; font-size:12px !important; padding:2px 6px !important;">
             <input type="time" id="ei-new-task-time" class="form-input compact-input" value="12:00" onclick="try{this.showPicker()}catch(e){}" style="width:80px; height:28px !important; font-size:12px !important; padding:2px 6px !important;" title="Время напоминания">
+            <input type="number" id="ei-new-task-duration" class="form-input compact-input" value="30" style="width:55px; height:28px !important; font-size:12px !important; padding:2px 6px !important;" title="Длительность (мин)" placeholder="мин">
             <button class="btn btn-save-compact" onclick="addLeadTask('${id}')" style="padding:4px 10px !important; font-size:12px !important; height:28px !important; margin:0; line-height:1;">Поставить</button>
           </div>
         </div>
@@ -2489,25 +2522,179 @@ async function addLeadComment(id) {
   }
 }
 
+function renderLeadPaymentsBlock(lead) {
+  if (!lead) return '';
+  // Бюджет = из проекта (Стоимость заказа), фолбек — поле Бюджет на лиде
+  const projectPrice = getLeadProjectPrice(lead);
+  const budget = projectPrice || Number(lead.fields['Бюджет']) || 0;
+  const paid = calculateLeadPayments(lead);
+  const remaining = budget - paid;
+  const pct = budget > 0 ? Math.min(Math.round((paid / budget) * 100), 100) : 0;
+  const barColor = pct >= 100 ? '#34d399' : pct >= 50 ? '#f59e0b' : '#6366f1';
+  const payments = getLeadPaymentsList(lead);
+
+  const paymentRows = payments.length > 0
+    ? payments.map(p => {
+        const f = p.fields;
+        const catName = f['Категория'] || '—';
+        const accName = f['Источник'] || '—';
+        const txId = f['ID транзакции'] || '';
+        const dateStr = f['Дата транзакции'] ? f['Дата транзакции'].substring(0,10) : '—';
+        const amt = Number(f['Сумма']) || 0;
+        return `
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+            <div>
+              <div style="font-size:12px; font-weight:700; color:#34d399;">+${amt.toLocaleString('ru-RU')} ₸</div>
+              <div style="font-size:11px; color:var(--text2); margin-top:2px;">${dateStr} · ${escHtml(catName)} · ${escHtml(accName)}</div>
+            </div>
+            <div style="display:flex; align-items:center; gap:6px;">
+              ${txId ? `<span style="font-size:10px; color:var(--text2);">#${txId}</span>` : ''}
+              <button onclick="openFinanceFromLead('${p.id}')" style="background:none; border:none; color:#6366f1; cursor:pointer; font-size:12px; padding:2px 6px;" title="Открыть в финансах">↗️</button>
+            </div>
+          </div>`;
+      }).join('')
+    : `<div style="font-size:12px; color:var(--text2); padding:8px 0;">Платежей ещё нет</div>`;
+
+  return `
+    <div style="margin-bottom:12px;">
+      <div class="section-title" style="display:flex; justify-content:space-between; align-items:center;">
+        <span>💰 Платежи</span>
+        <button onclick="openAddPaymentFromLead('${lead.id}')" style="background:linear-gradient(135deg,#10b981,#059669); border:none; color:#fff; border-radius:8px; padding:4px 10px; font-size:11px; font-weight:700; cursor:pointer;">+ Добавить</button>
+      </div>
+      <div style="background:var(--surface2); border-radius:10px; padding:12px; border:1px solid rgba(255,255,255,0.06);">
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-bottom:10px;">
+          <div>
+            <div style="font-size:10px; color:var(--text2); font-weight:700; text-transform:uppercase; margin-bottom:2px;">Бюджет</div>
+            <div style="font-size:14px; font-weight:800; color:#fff;">${budget.toLocaleString('ru-RU')} ₸</div>
+          </div>
+          <div>
+            <div style="font-size:10px; color:var(--text2); font-weight:700; text-transform:uppercase; margin-bottom:2px;">Оплачено</div>
+            <div style="font-size:14px; font-weight:800; color:#34d399;">${paid.toLocaleString('ru-RU')} ₸</div>
+          </div>
+          <div>
+            <div style="font-size:10px; color:var(--text2); font-weight:700; text-transform:uppercase; margin-bottom:2px;">Остаток</div>
+            <div style="font-size:14px; font-weight:800; color:${remaining > 0 ? '#f59e0b' : '#34d399'};">${remaining > 0 ? remaining.toLocaleString('ru-RU') + ' ₸' : '✅ Закрыто'}</div>
+          </div>
+        </div>
+        ${budget > 0 ? `
+        <div style="background:rgba(255,255,255,0.06); border-radius:6px; height:6px; overflow:hidden; margin-bottom:10px;">
+          <div style="height:6px; border-radius:6px; background:${barColor}; width:${pct}%; transition:width 0.4s;"></div>
+        </div>` : ''}
+        ${paymentRows}
+      </div>
+    </div>`;
+}
+window.renderLeadPaymentsBlock = renderLeadPaymentsBlock;
+
+function openFinanceFromLead(incomeId) {
+  navigate('finance');
+  setTimeout(() => {
+    const el = document.getElementById('finance-search-input');
+    if (el) {
+      // Ищем по ID транзакции
+      const inc = State.financeIncomes.find(i => i.id === incomeId);
+      if (inc) {
+        el.value = inc.fields['Примечание'] || '';
+        onFinanceSearch();
+      }
+    }
+  }, 1500);
+}
+window.openFinanceFromLead = openFinanceFromLead;
+
+async function openAddPaymentFromLead(leadId) {
+  const lead = State.leads.find(l => l.id === leadId);
+  if (!lead) return;
+  await openAddOperationMenu();
+  // Выставляем тип Доходы и привязываем лид
+  const typeSelect = document.getElementById('uni-op-type');
+  if (typeSelect) { typeSelect.value = 'Доходы'; onUnifiedOpTypeChange('Доходы'); }
+  document.getElementById('uni-lead-id').value = leadId;
+  setUnifiedOpTypeEnabled(false);
+  // Предзаполняем сумму из остатка
+  const paid = calculateLeadPayments(lead);
+  const remaining = (Number(lead.fields['Бюджет']) || 0) - paid;
+  if (remaining > 0) document.getElementById('uni-amount').value = remaining;
+  // Показываем привязку лида
+  showLeadLinkInForm(lead);
+}
+window.openAddPaymentFromLead = openAddPaymentFromLead;
+
+function showLeadLinkInForm(lead) {
+  const group = document.getElementById('uni-lead-link-group');
+  const selectedEl = document.getElementById('uni-lead-selected');
+  const nameEl = document.getElementById('uni-lead-selected-name');
+  if (group) group.style.display = 'block';
+  if (selectedEl) { selectedEl.style.display = 'flex'; }
+  if (nameEl) nameEl.textContent = '🎯 ' + (lead.fields['Имя'] || lead.id);
+  const searchEl = document.getElementById('uni-lead-search');
+  if (searchEl) searchEl.style.display = 'none';
+}
+window.showLeadLinkInForm = showLeadLinkInForm;
+
 function calculateLeadPayments(lead) {
   if (!lead) return 0;
-  const leadDeals = (State.deals || []).filter(d => {
-    const contactLinks = d.fields['Контакты ID'] || [];
-    const isLinkedByContact = contactLinks.some(c => String(c.id) === String(lead.id));
-    const leadProjectLinks = lead.fields['Проекты'] || [];
-    const isLinkedByProject = leadProjectLinks.some(p => String(p.id) === String(d.id));
-    return isLinkedByContact || isLinkedByProject;
+
+  // Метод 1: через link_row Проекты (LEADS.Проекты → DEALS)
+  const leadProjectIds = new Set();
+  const projectIdStr = String(lead.fields['Проекты ID'] || '');
+  projectIdStr.split(',').map(x => x.trim()).filter(Boolean).forEach(id => leadProjectIds.add(id));
+
+  let total = 0;
+
+  if (leadProjectIds.size > 0) {
+    // Суммируем доходы где Заказ ID = один из проектов лида
+    const byProject = (State.financeIncomes || []).filter(inc => {
+      const zakazId = String(inc.fields['Заказ ID'] || inc.fields['Заказ'] || '');
+      return zakazId && leadProjectIds.has(zakazId.split(',')[0].trim());
+    });
+    total += byProject.reduce((sum, inc) => sum + (Number(inc.fields['Сумма']) || 0), 0);
+  }
+
+  // Метод 2: прямая связь через Лид ID (для операций добавленных вручную без проекта)
+  const byLeadId = (State.financeIncomes || []).filter(inc => {
+    const lid = String(inc.fields['Лид ID'] || '');
+    if (!lid || lid === String(lead.id)) return false;
+    // Не считаем дважды если уже учтён через проект
+    const zakazId = String(inc.fields['Заказ ID'] || '');
+    return lid === String(lead.id) && (!zakazId || !leadProjectIds.has(zakazId.split(',')[0].trim()));
   });
-  
-  const dealIds = leadDeals.map(d => String(d.id));
-  if (dealIds.length === 0) return 0;
-  
-  const leadIncomes = (State.financeIncomes || []).filter(inc => {
-    const orderLinks = inc.fields['Заказ'] || [];
-    return orderLinks.some(o => dealIds.includes(String(o.id)));
+  // Исправляем — прямая привязка
+  const byLeadIdDirect = (State.financeIncomes || []).filter(inc =>
+    String(inc.fields['Лид ID'] || '') === String(lead.id)
+  );
+  // Берём уникальные (не дублируем)
+  const counted = new Set(leadProjectIds.size > 0
+    ? (State.financeIncomes || []).filter(inc => {
+        const zakazId = String(inc.fields['Заказ ID'] || '').split(',')[0].trim();
+        return zakazId && leadProjectIds.has(zakazId);
+      }).map(i => i.id)
+    : []);
+  const additionalByLead = byLeadIdDirect.filter(inc => !counted.has(inc.id));
+  total += additionalByLead.reduce((sum, inc) => sum + (Number(inc.fields['Сумма']) || 0), 0);
+
+  return total;
+}
+
+function getLeadProjectPrice(lead) {
+  if (!lead) return 0;
+  const ids = String(lead.fields['Проекты ID'] || '').split(',').map(x => x.trim()).filter(Boolean);
+  if (!ids.length) return 0;
+  return (State.deals || [])
+    .filter(d => ids.includes(String(d.id)))
+    .reduce((sum, d) => sum + (Number(d.fields['Стоимость заказа']) || 0), 0);
+}
+
+function getLeadPaymentsList(lead) {
+  if (!lead) return [];
+  const byLeadId = (State.financeIncomes || []).filter(inc =>
+    String(inc.fields['Лид ID'] || '') === String(lead.id)
+  );
+  return byLeadId.sort((a, b) => {
+    const da = a.fields['Дата транзакции'] || '';
+    const db = b.fields['Дата транзакции'] || '';
+    return db.localeCompare(da);
   });
-  
-  return leadIncomes.reduce((sum, inc) => sum + (Number(inc.fields['Сумма']) || 0), 0);
 }
 
 function getSyncedConsultationFields(tasks) {
@@ -2534,13 +2721,15 @@ function getSyncedConsultationFields(tasks) {
     return {
       'Дата консультации': dbDate,
       'Время консультации': primaryTask.dueTime || '',
-      'Консультация проведена': primaryTask.done
+      'Консультация проведена': primaryTask.done,
+      'Длительность': primaryTask.duration || 30
     };
   } else {
     return {
       'Дата консультации': null,
       'Время консультации': null,
-      'Консультация проведена': false
+      'Консультация проведена': false,
+      'Длительность': null
     };
   }
 }
@@ -2550,10 +2739,12 @@ async function addLeadTask(id) {
   const dateEl = document.getElementById('ei-new-task-date');
   const timeEl = document.getElementById('ei-new-task-time');
   const typeEl = document.getElementById('ei-new-task-type');
+  const durationEl = document.getElementById('ei-new-task-duration');
   const text = textEl?.value.trim();
   const dueDate = dateEl?.value;
   const dueTime = timeEl?.value || '12:00';
   const taskType = typeEl?.value || 'call';
+  const duration = durationEl ? (Number(durationEl.value) || 30) : 30;
 
   if (!text) { toast('Введите текст задачи', 'error'); return; }
   if (!dueDate) { toast('Выберите срок выполнения', 'error'); return; }
@@ -2571,6 +2762,7 @@ async function addLeadTask(id) {
     type: taskType,
     dueDate: dueDate,
     dueTime: dueTime,
+    duration: duration,
     done: false,
     createdAt: dateStr,
     completedAt: '',
@@ -2601,6 +2793,7 @@ async function addLeadTask(id) {
   textEl.value = '';
   dateEl.value = '';
   if (timeEl) timeEl.value = '12:00';
+  if (durationEl) durationEl.value = '30';
 
   try {
     await Airtable.update(CONFIG.TABLES.LEADS, id, updates);
@@ -2711,12 +2904,144 @@ function onNewTaskTypeChange(type) {
   }
 }
 
+function renderInlineTaskEditForm(leadId, task) {
+  return `
+    <div class="timeline-task-card edit-mode" style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:12px; display:flex; flex-direction:column; gap:8px; align-self:stretch; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+      <div style="font-size:11px; font-weight:700; color:var(--text2); display:flex; justify-content:space-between;">
+        <span>✏️ Редактирование задачи</span>
+      </div>
+      <div style="display:flex; gap:6px;">
+        <select id="ei-edit-task-type-${task.id}" class="form-select compact-input" style="width:110px; padding:4px 8px !important; height:28px !important; font-size:12px !important; margin:0;">
+          <option value="call" ${task.type === 'call' ? 'selected' : ''}>Звонок</option>
+          <option value="consult" ${task.type === 'consult' ? 'selected' : ''}>Консультация</option>
+          <option value="task" ${task.type === 'task' ? 'selected' : ''}>Задача</option>
+        </select>
+        <input type="text" id="ei-edit-task-text-${task.id}" class="form-input compact-input" value="${escHtml(task.text)}" style="flex:1; margin:0; height:28px !important; font-size:12px !important; padding:2px 8px !important;">
+      </div>
+      <div style="display:flex; gap:6px; align-items:center;">
+        <input type="date" id="ei-edit-task-date-${task.id}" class="form-input compact-input" value="${task.dueDate}" onclick="try{this.showPicker()}catch(e){}" style="flex:1; height:28px !important; font-size:12px !important; padding:2px 6px !important;">
+        <input type="time" id="ei-edit-task-time-${task.id}" class="form-input compact-input" value="${task.dueTime || '12:00'}" onclick="try{this.showPicker()}catch(e){}" style="width:80px; height:28px !important; font-size:12px !important; padding:2px 6px !important;">
+        <input type="number" id="ei-edit-task-duration-${task.id}" class="form-input compact-input" value="${task.duration || 30}" style="width:55px; height:28px !important; font-size:12px !important; padding:2px 6px !important;" title="Длительность (мин)" placeholder="мин">
+      </div>
+      <div style="display:flex; justify-content:flex-end; gap:6px; margin-top:4px;">
+        <button class="btn btn-secondary btn-compact" onclick="cancelEditTask()" style="padding:4px 10px !important; font-size:11px !important; height:24px !important; margin:0; line-height:1;">Отмена</button>
+        <button class="btn btn-save-compact" onclick="saveEditTask('${leadId}', '${task.id}')" style="padding:4px 10px !important; font-size:11px !important; height:24px !important; margin:0; line-height:1; background:var(--primary); color:#fff; border:none;">Сохранить</button>
+      </div>
+    </div>
+  `;
+}
+
+function startEditTask(taskId) {
+  State.editingTaskId = taskId;
+  const lead = State.leads.find(l => {
+    const tasks = safeJsonParse(l.fields['Задачи'] || '[]');
+    return Array.isArray(tasks) && tasks.some(t => t.id === taskId);
+  });
+  if (lead) {
+    renderLeadMiddleColumn(lead);
+  }
+}
+
+function cancelEditTask() {
+  State.editingTaskId = null;
+  if (window._activeLeadId) {
+    const lead = State.leads.find(l => l.id === window._activeLeadId);
+    if (lead) {
+      renderLeadMiddleColumn(lead);
+    }
+  }
+}
+
+async function saveEditTask(leadId, taskId) {
+  const lead = State.leads.find(l => l.id === leadId);
+  if (!lead) return;
+
+  const typeEl = document.getElementById(`ei-edit-task-type-${taskId}`);
+  const textEl = document.getElementById(`ei-edit-task-text-${taskId}`);
+  const dateEl = document.getElementById(`ei-edit-task-date-${taskId}`);
+  const timeEl = document.getElementById(`ei-edit-task-time-${taskId}`);
+  const durationEl = document.getElementById(`ei-edit-task-duration-${taskId}`);
+
+  const taskType = typeEl?.value || 'call';
+  const text = textEl?.value.trim();
+  const dueDate = dateEl?.value;
+  const dueTime = timeEl?.value || '12:00';
+  const duration = durationEl ? (Number(durationEl.value) || 30) : 30;
+
+  if (!text) { toast('Введите текст задачи', 'error'); return; }
+  if (!dueDate) { toast('Выберите срок выполнения', 'error'); return; }
+
+  const tasks = safeJsonParse(lead.fields['Задачи'] || '[]');
+  const task = tasks.find(t => t.id === taskId);
+  if (!task) return;
+
+  const currentUser = localStorage.getItem('crm_current_user') || 'Система';
+  const dateStr = new Date().toLocaleString('ru-RU');
+
+  // Логируем изменения задачи в историю
+  const changes = [];
+  if (task.text !== text) changes.push(`текст: «${task.text}» → «${text}»`);
+  if (task.type !== taskType) changes.push(`тип: «${task.type}» → «${taskType}»`);
+  if (task.dueDate !== dueDate) changes.push(`дата: «${task.dueDate}» → «${dueDate}»`);
+  if (task.dueTime !== dueTime) changes.push(`время: «${task.dueTime || '—'}» → «${dueTime}»`);
+  if (task.duration !== duration) changes.push(`длительность: «${task.duration || '—'}» → «${duration} мин»`);
+
+  task.text = text;
+  task.type = taskType;
+  task.dueDate = dueDate;
+  task.dueTime = dueTime;
+  task.duration = duration;
+
+  const history = safeJsonParse(lead.fields['История'] || '[]');
+  if (changes.length > 0) {
+    history.unshift({
+      date: dateStr,
+      user: currentUser,
+      type: 'task_edit',
+      taskId: taskId,
+      details: `Редактирована задача: ${changes.join(', ')}`
+    });
+  }
+
+  const updates = {
+    'Задачи': JSON.stringify(tasks),
+    'История': JSON.stringify(history)
+  };
+  
+  const synced = getSyncedConsultationFields(tasks);
+  Object.assign(updates, synced);
+
+  try {
+    await Airtable.update(CONFIG.TABLES.LEADS, leadId, updates);
+    Object.assign(lead.fields, updates);
+    
+    State.editingTaskId = null;
+    
+    renderLeadMiddleColumn(lead);
+    renderKanban(State.leads);
+    
+    if (typeof renderCalendar === 'function') {
+      renderCalendar();
+    }
+    
+    toast('Задача обновлена ✓');
+    if (typeof syncGoogleCalendarEvent === 'function') {
+      syncGoogleCalendarEvent(lead).catch(console.error);
+    }
+  } catch (e) {
+    toast('Ошибка обновления задачи: ' + e.message, 'error');
+  }
+}
+
 // Expose these functions to window context
 window.addLeadComment = addLeadComment;
 window.addLeadTask = addLeadTask;
 window.toggleTaskDone = toggleTaskDone;
 window.toggleTaskCancelled = toggleTaskCancelled;
 window.onNewTaskTypeChange = onNewTaskTypeChange;
+window.startEditTask = startEditTask;
+window.cancelEditTask = cancelEditTask;
+window.saveEditTask = saveEditTask;
 
 // ─── Синхронизация с Google Календарем
 async function syncGoogleCalendarEvent(lead) {
@@ -2864,10 +3189,6 @@ async function openLeadDetail(id, stage) {
               ${empOptions}
             </select>
           </div>
-          <div class="form-group">
-            <label class="form-label">⏱ Длительность (мин)</label>
-            <input class="form-input compact-input" id="ei-duration" type="number" placeholder="По умолчанию (60/30)" value="${escHtml(String(f['Длительность']||''))}"/>
-          </div>
           <div class="form-group form-group-full">
             <label class="form-label">🔗 Ссылка на запись встречи</label>
             <div style="display:flex; gap:6px; align-items:center">
@@ -2912,6 +3233,9 @@ async function openLeadDetail(id, stage) {
           ${isSold     ? `<button class="btn btn-danger btn-compact" onclick="openRefundModal('${id}')" style="font-weight:700; display:inline-flex; align-items:center; justify-content:center; gap:6px;">↩️ Сделать возврат</button>` : ''}
         </div>` : ''}
 
+        <!-- Payments block -->
+        ${renderLeadPaymentsBlock(lead)}
+
         <!-- Tools -->
         <div class="section-title">Инструменты</div>
         <div class="tools-panel" style="display:flex; gap:6px; margin:0;">
@@ -2946,7 +3270,6 @@ async function openLeadDetail(id, stage) {
   attachAutoSave('ei-niche', 'blur');
   attachAutoSave('ei-budget', 'blur');
   attachAutoSave('ei-manager', 'change');
-  attachAutoSave('ei-duration', 'blur');
   attachAutoSave('ei-record-link', 'blur');
   attachAutoSave('ei-nontarget-reason', 'change');
   attachAutoSave('ei-comment', 'blur');
@@ -2990,8 +3313,6 @@ async function saveLeadEdit(id, silent = false) {
   if (nonTargetEl) fields['Причина: Не целевой'] = nonTargetEl.value || null;
   fields['Ссылка на запись'] = recordLink;
   fields['Instagram'] = instagram;
-  const durationVal = document.getElementById('ei-duration')?.value.trim();
-  fields['Длительность'] = durationVal ? Number(durationVal) : null;
 
   // ─── Логируем изменения полей в историю
   const changedFieldsList = [];
@@ -3001,7 +3322,6 @@ async function saveLeadEdit(id, silent = false) {
     { key: 'Источник',               label: 'Источник' },
     { key: 'Ниша',                   label: 'Ниша' },
     { key: 'Бюджет',                 label: 'Бюджет' },
-    { key: 'Длительность',           label: 'Длительность' },
     { key: 'Оплата',                 label: 'Оплачено' },
     { key: 'Дата консультации',      label: 'Дата консультации' },
     { key: 'Время консультации',     label: 'Время консультации' },
@@ -3037,7 +3357,7 @@ async function saveLeadEdit(id, silent = false) {
 
   // Сохраняем снимок перед применением изменений для отмены по Cmd+Z
   const snapshot = {};
-  const fieldsToSnap = ['Имя', 'Телефон', 'Источник', 'Ниша', 'Комментарий', 'Бюджет', 'Длительность', 'Менеджер', 'Причина: Не целевой', 'Ссылка на запись', 'Instagram', 'История', 'Дата назначения'];
+  const fieldsToSnap = ['Имя', 'Телефон', 'Источник', 'Ниша', 'Комментарий', 'Бюджет', 'Менеджер', 'Причина: Не целевой', 'Ссылка на запись', 'Instagram', 'История', 'Дата назначения'];
   for (const key of fieldsToSnap) {
     snapshot[key] = lead.fields[key] !== undefined ? JSON.parse(JSON.stringify(lead.fields[key])) : null;
   }
@@ -3943,6 +4263,10 @@ async function saveDeal() {
     if (client)   { fields['Клиент ID']    = clientId;   fields['Клиент']    = client.fields['Имя']      || ''; }
     if (tariff)   { fields['Тариф ID']     = tariffId;   fields['Тариф']     = tariff.fields['Название'] || ''; }
     if (emp)      { fields['Сотрудник ID'] = employeeId; fields['Сотрудник'] = emp.fields['Имя']         || ''; }
+
+    // Привязываем заявку если есть
+    const leadId = document.getElementById('d-lead-id')?.value || '';
+    if (leadId) fields['Заявка ID'] = leadId;
 
     const res = await Airtable.create(CONFIG.TABLES.DEALS, fields);
     const newRec = res.records?.[0] || { id: 'tmp_' + Date.now(), fields };

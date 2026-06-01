@@ -261,16 +261,21 @@ if(localStorage.getItem('sidebar_collapsed')!=='0'){
   </div>
 
   <!-- Unified Table -->
-  <div id="finance-table-container" class="an-table-wrap" style="max-height: 500px; overflow-y: auto;">
+  <div style="display:flex; justify-content:flex-end; margin-bottom:6px;">
+    <span id="finance-table-count" style="font-size:11px; color:var(--text2); font-weight:600;"></span>
+  </div>
+  <div id="finance-table-container" class="an-table-wrap" style="max-height:600px; overflow-y:auto;">
     <table class="an-table">
       <thead>
         <tr>
+          <th style="width:50px; color:var(--text2);">#ID</th>
           <th>Дата</th>
           <th>Тип</th>
           <th>Сумма</th>
           <th>Счет</th>
           <th>Категория</th>
-          <th>Контрагент / Заказ</th>
+          <th>Проект</th>
+          <th>Заявка</th>
           <th>Примечание / Отв.</th>
           <th style="width:40px;"></th>
         </tr>
@@ -491,6 +496,7 @@ if(localStorage.getItem('sidebar_collapsed')!=='0'){
     <button class="drawer-close-btn" onclick="closeDrawer('drawer-deal')">&times;</button>
     <div class="drawer-handle"></div>
     <div class="drawer-title">📁 Новый проект</div>
+    <input type="hidden" id="d-lead-id"/>
 
     <div class="form-group"><label class="form-label">Название проекта *</label>
       <input id="d-name" class="form-input compact-input" type="text" placeholder="SMM для @brand"/></div>
@@ -559,7 +565,20 @@ if(localStorage.getItem('sidebar_collapsed')!=='0'){
     <div class="drawer-handle"></div>
     <div id="unified-op-title" class="drawer-title">➕ Добавить операцию</div>
     <input type="hidden" id="uni-lead-id" />
-    
+
+    <!-- Привязка к заявке -->
+    <div id="uni-lead-link-group" class="form-group" style="display:none;">
+      <label class="form-label">Заявка</label>
+      <div style="position:relative;">
+        <input id="uni-lead-search" class="form-input" type="text" placeholder="Поиск по имени лида..." oninput="onUniLeadSearch(this.value)" autocomplete="off"/>
+        <div id="uni-lead-dropdown" style="display:none; position:absolute; top:100%; left:0; right:0; background:var(--surface2); border:1px solid rgba(255,255,255,0.1); border-radius:10px; max-height:200px; overflow-y:auto; z-index:999; margin-top:4px;"></div>
+      </div>
+      <div id="uni-lead-selected" style="display:none; margin-top:6px; background:rgba(99,102,241,0.1); border:1px solid rgba(99,102,241,0.3); border-radius:8px; padding:8px 12px; display:none; justify-content:space-between; align-items:center;">
+        <span id="uni-lead-selected-name" style="font-size:13px; font-weight:600; color:#a5b4fc;"></span>
+        <button onclick="clearUniLeadLink()" style="background:none; border:none; color:var(--text2); cursor:pointer; font-size:16px; padding:0 4px;">×</button>
+      </div>
+    </div>
+
     <div class="form-group">
       <label class="form-label">Тип операции *</label>
       <select id="uni-op-type" class="form-select" onchange="onUnifiedOpTypeChange(this.value)">
@@ -570,10 +589,15 @@ if(localStorage.getItem('sidebar_collapsed')!=='0'){
       </select>
     </div>
 
-    <div id="uni-amount-grid" style="display: block; margin-bottom: 16px;">
+    <div id="uni-amount-grid" style="display:grid; grid-template-columns:1fr; gap:12px; margin-bottom:16px;">
       <div class="form-group" style="margin:0;">
-        <label id="uni-amount-label" class="form-label">Сумма *</label>
+        <label id="uni-amount-label" class="form-label">Сумма в кассу *</label>
         <input id="uni-amount" class="form-input" type="number" placeholder="500000" />
+      </div>
+      <div id="uni-tariff-price-group" class="form-group" style="margin:0; display:none;">
+        <label class="form-label">Цена по договору *</label>
+        <input id="uni-tariff-price" class="form-input" type="number" placeholder="500000"/>
+        <div style="font-size:11px; color:var(--text2); margin-top:4px;">Полная стоимость проекта (если оплата частичная)</div>
       </div>
     </div>
 
@@ -592,16 +616,9 @@ if(localStorage.getItem('sidebar_collapsed')!=='0'){
       <select id="uni-category" class="form-select"><option value="">Выберите категорию</option></select>
     </div>
 
-    <div id="uni-client-group" class="form-group">
-      <label class="form-label">Клиент *</label>
-      <select id="uni-client" class="form-select" onchange="if(this.value==='new_client'){this.value=''; openUniNewClientForm();} else {onUnifiedClientChange(this.value);}">
-        <option value="">Выберите клиента</option>
-      </select>
-    </div>
-
     <div id="uni-deal-group" class="form-group">
-      <label class="form-label">Заказ / Проект</label>
-      <select id="uni-deal" class="form-select" onchange="if(this.value==='new_deal'){this.value=''; openUniNewDealForm();}">
+      <label class="form-label">Проект</label>
+      <select id="uni-deal" class="form-select" onchange="if(this.value==='new_deal'){this.value=''; openUniNewDealForm();} else { onUniDealChange(this.value); }">
         <option value="">Выберите проект</option>
       </select>
     </div>
