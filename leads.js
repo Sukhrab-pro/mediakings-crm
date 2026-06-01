@@ -660,8 +660,8 @@ function renderLeadsStats() {
   const consultAppointedInPeriod = activePipelineLeads.filter(l => {
     const tasks = safeJsonParse(l.fields['Задачи'] || '[]');
     return tasks.some(t => {
-      if (t.type !== 'consult') return false;
-      const d = parseDateStr(t.assignedDate || t.dueDate);
+      if ((t.type !== 'consult' && t.type !== 'call') || t.cancelled) return false;
+      const d = parseDateStr(t.dueDate);
       return d && d >= period.start && d <= period.end;
     });
   }).length;
@@ -669,7 +669,7 @@ function renderLeadsStats() {
   const consultDoneInPeriod = activePipelineLeads.filter(l => {
     const tasks = safeJsonParse(l.fields['Задачи'] || '[]');
     return tasks.some(t => {
-      if (t.type !== 'consult' || !t.done) return false;
+      if ((t.type !== 'consult' && t.type !== 'call') || !t.done || t.cancelled) return false;
       const d = parseDateStr(t.dueDate);
       return d && d >= period.start && d <= period.end;
     });
@@ -2297,9 +2297,16 @@ function renderLeadMiddleColumn(lead) {
               }
               const isOverdue = !task.done && !task.cancelled && task.dueDate && task.dueDate < todayStr;
               const isToday = !task.done && !task.cancelled && task.dueDate === todayStr;
-              const dueClass = isOverdue ? 'overdue' : (isToday ? 'today' : 'future');
+              const dueClass = task.done ? 'done' : (isOverdue ? 'overdue' : (isToday ? 'today' : 'future'));
               const timeStr = task.dueTime ? ` в ${task.dueTime}` : '';
-              const statusLabel = task.done ? 'Выполнено' : (isOverdue ? 'Просрочено' : (isToday ? 'Сегодня' : 'Предстоит'));
+              
+              let dueLabelHtml = '';
+              if (task.done) {
+                dueLabelHtml = `<span class="task-due done" style="font-weight:700; padding:1px 6px; border-radius:4px; background:rgba(16,185,129,0.15); color:#10b981;">Назначено на: ${formatDate(task.dueDate)}${timeStr}${task.completedAt ? ` | Выполнено: ${task.completedAt}` : ''}</span>`;
+              } else {
+                const statusLabel = isOverdue ? 'Просрочено' : (isToday ? 'Сегодня' : 'Предстоит');
+                dueLabelHtml = `<span class="task-due ${dueClass}" style="font-weight:700; padding:1px 6px; border-radius:4px;">${statusLabel}: ${formatDate(task.dueDate)}${timeStr}</span>`;
+              }
               
               return `
                 <div class="timeline-task-card" style="background:${bg}; border:${border}; border-radius:12px; padding:12px; margin-bottom:4px; display:flex; gap:10px; align-items:flex-start; box-shadow: 0 2px 6px rgba(0,0,0,0.1); align-self: stretch; position:relative;">
@@ -2312,7 +2319,7 @@ function renderLeadMiddleColumn(lead) {
                     ${task.cancelled ? '' : `
                       <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:6px; font-size:10px;">
                         <span style="color:var(--text2)">👤 ${escHtml(task.user || '—')}</span>
-                        <span class="task-due ${dueClass}" style="font-weight:700; padding:1px 6px; border-radius:4px;">${statusLabel}: ${formatDate(task.dueDate)}${timeStr}</span>
+                        ${dueLabelHtml}
                         ${task.duration ? `<span style="color:var(--text3)">⏱ ${task.duration} мин</span>` : ''}
                       </div>
                     `}
@@ -2352,7 +2359,7 @@ function renderLeadMiddleColumn(lead) {
                     <div style="font-size:13px; font-weight:600; color:#fff; text-decoration:line-through; opacity:0.5;">${escHtml(task.text)}</div>
                     <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:6px; font-size:10px;">
                       <span style="color:var(--text2)">👤 ${escHtml(h.user || task.user || '—')}</span>
-                      <span class="task-due done" style="font-weight:700; padding:1px 6px; border-radius:4px; background:rgba(16,185,129,0.15); color:#10b981;">Выполнено: ${formatDate(task.dueDate)}${timeStr}</span>
+                      <span class="task-due done" style="font-weight:700; padding:1px 6px; border-radius:4px; background:rgba(16,185,129,0.15); color:#10b981;">Назначено на: ${formatDate(task.dueDate)}${timeStr}${task.completedAt ? ` | Выполнено: ${task.completedAt}` : ''}</span>
                     </div>
                   </div>
                 </div>
