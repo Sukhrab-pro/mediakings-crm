@@ -670,7 +670,7 @@ function renderLeadsStats() {
     const tasks = safeJsonParse(l.fields['Задачи'] || '[]');
     return tasks.some(t => {
       if ((t.type !== 'consult' && t.type !== 'call') || !t.done || t.cancelled) return false;
-      const d = parseDateStr(t.completedAt || t.dueDate);
+      const d = parseDateStr(t.dueDate);
       return d && d >= period.start && d <= period.end;
     });
   }).length;
