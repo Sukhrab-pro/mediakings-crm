@@ -670,7 +670,7 @@ function renderLeadsStats() {
     const tasks = safeJsonParse(l.fields['Задачи'] || '[]');
     return tasks.some(t => {
       if ((t.type !== 'consult' && t.type !== 'call') || !t.done || t.cancelled) return false;
-      const d = parseDateStr(t.dueDate);
+      const d = parseDateStr(t.completedAt || t.dueDate);
       return d && d >= period.start && d <= period.end;
     });
   }).length;
@@ -2325,7 +2325,7 @@ function renderLeadMiddleColumn(lead) {
                     `}
                   </div>
                   <div style="position:absolute; right:12px; top:12px; display:flex; gap:6px; align-items:center;">
-                    ${(!task.done && !task.cancelled) ? `
+                    ${!task.cancelled ? `
                       <span onclick="startEditTask('${task.id}')" style="font-size:12px; cursor:pointer; opacity:0.4; transition:opacity 0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.4" title="Редактировать задачу">✏️</span>
                       <span onclick="toggleTaskCancelled('${id}', '${task.id}')" style="font-size:11px; cursor:pointer; opacity:0.4; transition:opacity 0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.4" title="Отменить задачу">❌</span>
                     ` : ''}
@@ -2361,6 +2361,12 @@ function renderLeadMiddleColumn(lead) {
                       <span style="color:var(--text2)">👤 ${escHtml(h.user || task.user || '—')}</span>
                       <span class="task-due done" style="font-weight:700; padding:1px 6px; border-radius:4px; background:rgba(16,185,129,0.15); color:#10b981;">Назначено на: ${formatDate(task.dueDate)}${timeStr}${task.completedAt ? ` | Выполнено: ${task.completedAt}` : ''}</span>
                     </div>
+                  </div>
+                  <div style="position:absolute; right:12px; top:12px; display:flex; gap:6px; align-items:center;">
+                    ${!task.cancelled ? `
+                      <span onclick="startEditTask('${task.id}')" style="font-size:12px; cursor:pointer; opacity:0.4; transition:opacity 0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.4" title="Редактировать задачу">✏️</span>
+                      <span onclick="toggleTaskCancelled('${id}', '${task.id}')" style="font-size:11px; cursor:pointer; opacity:0.4; transition:opacity 0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.4" title="Отменить задачу">❌</span>
+                    ` : ''}
                   </div>
                 </div>
               `;
