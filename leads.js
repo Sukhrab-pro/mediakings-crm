@@ -1572,8 +1572,78 @@ function renderKanban(leads) {
 
 function initCardClicks() {
   document.querySelectorAll('.kanban-card').forEach(card => {
+    let touchTimeout = null;
+    let touchStartX = 0;
+    let touchStartY = 0;
+    const LONG_PRESS_DELAY = 600; // ms
+
+    card.addEventListener('touchstart', (e) => {
+      if (e.touches.length > 1) return;
+      const touch = e.touches[0];
+      touchStartX = touch.clientX;
+      touchStartY = touch.clientY;
+      card.dataset.longPressed = 'false';
+
+      const id = card.getAttribute('data-lead-id');
+      const stage = card.getAttribute('data-stage');
+
+      touchTimeout = setTimeout(() => {
+        touchTimeout = null;
+        card.dataset.longPressed = 'true';
+        
+        if (navigator.vibrate) {
+          navigator.vibrate(50);
+        }
+        
+        const mockEvent = {
+          clientX: touchStartX,
+          clientY: touchStartY,
+          preventDefault: () => {},
+          stopPropagation: () => {}
+        };
+        openCardContextMenu(mockEvent, id, stage);
+      }, LONG_PRESS_DELAY);
+    }, { passive: true });
+
+    card.addEventListener('touchmove', (e) => {
+      if (!touchTimeout) return;
+      const touch = e.touches[0];
+      const dx = Math.abs(touch.clientX - touchStartX);
+      const dy = Math.abs(touch.clientY - touchStartY);
+      if (dx > 10 || dy > 10) {
+        clearTimeout(touchTimeout);
+        touchTimeout = null;
+      }
+    }, { passive: true });
+
+    card.addEventListener('touchend', (e) => {
+      if (touchTimeout) {
+        clearTimeout(touchTimeout);
+        touchTimeout = null;
+      }
+      if (card.dataset.longPressed === 'true') {
+        e.preventDefault();
+        e.stopPropagation();
+        setTimeout(() => {
+          delete card.dataset.longPressed;
+        }, 100);
+      }
+    });
+
+    card.addEventListener('touchcancel', () => {
+      if (touchTimeout) {
+        clearTimeout(touchTimeout);
+        touchTimeout = null;
+      }
+      delete card.dataset.longPressed;
+    });
+
     card.addEventListener('click', (e) => {
       if (_justDropped) return;
+      if (card.dataset.longPressed === 'true') {
+        delete card.dataset.longPressed;
+        return;
+      }
       const id = card.getAttribute('data-lead-id');
       const stage = card.getAttribute('data-stage');
       
